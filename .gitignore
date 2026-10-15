@@ -1,0 +1,10 @@
+.DS_Store
+
+# build output
+/bin/
+/backend/internal/web/dist/
+
+# local databases
+*.db
+*.db-shm
+*.db-wal
