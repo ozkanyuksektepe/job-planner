@@ -157,7 +157,7 @@ export default function Board({ columns, onMove, columnClassName = 'w-72', ...di
       onDragEnd={onDragEnd}
       onDragCancel={onDragCancel}
     >
-      <div className="-mx-10 overflow-x-auto px-10 pb-4">
+      <div data-board-scroller className="-mx-10 overflow-x-auto px-10 pb-4">
         <div className="flex items-start gap-3">
           {columns.map((c) => (
             <Column

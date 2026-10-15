@@ -15,6 +15,7 @@ Tek kullanıcılıdır; giriş sistemi ve sunucu gerektirmez. Uygulama tek bir d
 - **Filtreleme:** Tüm görev listelerinde ve panolarda projeye, önceliğe, duruma ve etikete göre çoklu filtre. Filtreler adres çubuğunda saklanır; filtre açıkken eklenen görev seçili proje, öncelik ve etiketleri otomatik alır
 - **Görevler:** Durum (yapılacak / devam ediyor / tamamlandı), öncelik (düşük / orta / yüksek), planlanan gün, son tarih, açıklama
 - **Alt görevler:** Görevleri parçalara bölme ve ilerlemeyi takip etme
+- **Fotoğraflar:** Görevlere fotoğraf ekleme (dosya seçerek, sürükle-bırak ya da ⌘V ile yapıştırarak), büyük görüntüleme ve indirme. PNG, JPEG, GIF ve WebP; fotoğraf başına en fazla 20 MB
 - **Notlar:** Notion benzeri zengin metin editörü (başlıklar, listeler, yapılacaklar listesi, alıntı, kod bloğu), Markdown kısayolları ve otomatik kayıt
 - **Tema:** Açık, koyu ya da sistem temasını takip eden görünüm
 
@@ -91,12 +92,13 @@ Bu komutla **http://localhost:5173** adresini aç. Frontend'de yaptığın deği
 Veritabanı varsayılan olarak proje klasörünün **dışında** tutulur. Böylece kodu silsen ya da yeniden klonlasan bile verilerin etkilenmez:
 
 ```
-~/.jobplanner/jobplanner.db
+~/.jobplanner/jobplanner.db       veritabanı
+~/.jobplanner/attachments/        görevlere eklenen fotoğraflar
 ```
 
 - `.jobplanner` gizli bir klasördür. Finder'da görmek için `Cmd + Shift + .` tuşlarına bas ya da terminalde `open ~/.jobplanner` komutunu çalıştır.
 - Klasörde `jobplanner.db-wal` ve `jobplanner.db-shm` dosyaları da bulunur. Bunlar SQLite'ın çalışma dosyalarıdır, silme.
-- **Yedek almak için** uygulamayı durdur ve bu üç dosyayı birlikte kopyala.
+- **Yedek almak için** uygulamayı durdur ve `~/.jobplanner` klasörünün **tamamını** kopyala (veritabanı dosyaları ve `attachments` klasörü birlikte).
 - Veritabanını incelemek için [DB Browser for SQLite](https://sqlitebrowser.org/) kullanılabilir. Elle düzenleme yapmadan önce uygulamayı durdur.
 - `.db` dosyaları `.gitignore` ile hariç tutulur; kişisel verilerin repoya gönderilmez.
 
@@ -155,6 +157,10 @@ Tüm uç noktalar JSON alıp döndürür ve `/api` altındadır.
 | `GET` | `/api/tasks?backlog_before=YYYY-MM-DD` | Günü bu tarihten önce olan açık görevler (Bekleyenler) |
 | `POST` | `/api/tasks` | Görev ya da alt görev oluşturur |
 | `GET` `PATCH` `DELETE` | `/api/tasks/{id}` | Görev detayı, güncelleme, silme (alt görevleriyle birlikte) |
+| `GET` | `/api/tasks/{id}/attachments` | Görevin fotoğraflarını listeler |
+| `POST` | `/api/tasks/{id}/attachments` | Fotoğraf yükler (`multipart/form-data`, bir ya da daha çok `file` alanı) |
+| `GET` | `/api/attachments/{id}/file` | Fotoğraf dosyasını döndürür |
+| `DELETE` | `/api/attachments/{id}` | Fotoğrafı siler |
 | `GET` `POST` | `/api/tags` | Etiketleri listeler / oluşturur (aynı isim varsa mevcut etiketi döndürür) |
 | `GET` `PATCH` `DELETE` | `/api/tags/{id}` | Etiket detayı, güncelleme, silme (görevler silinmez) |
 | `GET` `POST` | `/api/boards` | Panoları listeler / oluşturur |

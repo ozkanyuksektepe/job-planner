@@ -26,9 +26,14 @@ func invalid(format string, a ...any) error {
 // nowSQL is the SQLite expression used for created_at / updated_at values.
 const nowSQL = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db             *sql.DB
+	attachmentsDir string // where attached image files are stored
+}
 
-func New(db *sql.DB) *Store { return &Store{db: db} }
+func New(db *sql.DB, attachmentsDir string) *Store {
+	return &Store{db: db, attachmentsDir: attachmentsDir}
+}
 
 // Patch is a partial update decoded from JSON: only the keys present are changed.
 type Patch map[string]json.RawMessage

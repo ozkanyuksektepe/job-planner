@@ -31,7 +31,19 @@ export interface Task {
   parent_title: string | null
   subtask_count: number
   subtask_done: number
+  attachment_count: number
   tags: TagRef[]
+}
+
+export interface Attachment {
+  id: number
+  task_id: number
+  filename: string
+  content_type: string
+  size: number
+  created_at: string
+  /** where the image file is served */
+  url: string
 }
 
 export interface TagRef {
@@ -167,6 +179,26 @@ export const api = {
     create: (input: TaskInput) => request<Task>('POST', '/tasks', input),
     update: (id: number, patch: TaskPatch) => request<Task>('PATCH', `/tasks/${id}`, patch),
     remove: (id: number) => request<void>('DELETE', `/tasks/${id}`),
+  },
+  attachments: {
+    list: (taskId: number) => request<Attachment[]>('GET', `/tasks/${taskId}/attachments`),
+    /** multipart upload; the server checks the real file type and size */
+    upload: async (taskId: number, files: File[]) => {
+      const form = new FormData()
+      files.forEach((f) => form.append('file', f, f.name))
+      const res = await fetch(`/api/tasks/${taskId}/attachments`, { method: 'POST', body: form })
+      if (!res.ok) {
+        let msg = res.statusText
+        try {
+          msg = (await res.json()).error ?? msg
+        } catch {
+          // response had no JSON body
+        }
+        throw new ApiError(res.status, msg)
+      }
+      return (await res.json()) as Attachment[]
+    },
+    remove: (id: number) => request<void>('DELETE', `/attachments/${id}`),
   },
   tags: {
     list: () => request<Tag[]>('GET', '/tags'),

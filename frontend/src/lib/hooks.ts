@@ -11,6 +11,7 @@ export const keys = {
   taskList: (p: TaskListParams) => ['tasks', 'list', p] as const,
   today: (date: string) => ['tasks', 'today', date] as const,
   task: (id: number) => ['tasks', 'one', id] as const,
+  attachments: (taskId: number) => ['attachments', taskId] as const,
   tags: ['tags'] as const,
   tag: (id: number) => ['tags', 'one', id] as const,
   boards: ['boards'] as const,
@@ -105,6 +106,38 @@ export function useUpdateTask() {
 export function useDeleteTask() {
   const invalidate = useInvalidateTasks()
   return useMutation({ mutationFn: (id: number) => api.tasks.remove(id), onSuccess: invalidate })
+}
+
+// --- attachments ---
+
+export function useAttachments(taskId: number) {
+  return useQuery({ queryKey: keys.attachments(taskId), queryFn: () => api.attachments.list(taskId) })
+}
+
+/** Attachment changes also change the task's attachment_count shown in lists. */
+function useInvalidateAttachments() {
+  const qc = useQueryClient()
+  return (taskId: number) => {
+    qc.invalidateQueries({ queryKey: keys.attachments(taskId) })
+    qc.invalidateQueries({ queryKey: keys.tasks })
+    qc.invalidateQueries({ queryKey: keys.boards })
+  }
+}
+
+export function useUploadAttachments() {
+  const invalidate = useInvalidateAttachments()
+  return useMutation({
+    mutationFn: ({ taskId, files }: { taskId: number; files: File[] }) => api.attachments.upload(taskId, files),
+    onSettled: (_, __, { taskId }) => invalidate(taskId),
+  })
+}
+
+export function useDeleteAttachment() {
+  const invalidate = useInvalidateAttachments()
+  return useMutation({
+    mutationFn: ({ id }: { id: number; taskId: number }) => api.attachments.remove(id),
+    onSuccess: (_, { taskId }) => invalidate(taskId),
+  })
 }
 
 // --- tags ---

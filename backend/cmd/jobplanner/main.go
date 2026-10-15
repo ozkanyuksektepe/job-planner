@@ -29,8 +29,14 @@ func main() {
 	}
 	defer conn.Close()
 
+	// Attached images live next to the database, so backing up its folder backs up everything.
+	st := store.New(conn, filepath.Join(filepath.Dir(*dbPath), "attachments"))
+	if err := st.CleanupAttachments(); err != nil {
+		log.Printf("cleanup attachments: %v", err)
+	}
+
 	mux := http.NewServeMux()
-	api.New(store.New(conn)).Register(mux)
+	api.New(st).Register(mux)
 	mux.Handle("/", web.Handler())
 
 	srv := &http.Server{

@@ -5,6 +5,7 @@ import { addDays, formatTimestamp, todayISO } from '../lib/dates'
 import { useDeleteTask, useProjects, useTask, useTasks, useUpdateTask } from '../lib/hooks'
 import { useTaskPanel } from '../lib/useTaskPanel'
 import QuickAdd from './QuickAdd'
+import TaskAttachments from './TaskAttachments'
 import TagPicker from './TagPicker'
 import { TaskCheckbox } from './TaskItem'
 import { Button, ColorDot, CountPill, ErrorBox, PRIORITY_DOTS, PRIORITY_LABELS, Segmented, Spinner, STATUS_LABELS } from './ui'
@@ -201,6 +202,8 @@ function TaskForm({ task }: { task: Task }) {
         rows={4}
         className="field-sizing-content mb-7 min-h-24 w-full resize-none rounded-xl border border-line bg-surface-2 px-3.5 py-3 text-sm leading-relaxed outline-none transition-all placeholder:text-fg-faint focus:border-accent/50 focus:bg-surface focus:ring-4 focus:ring-accent/10"
       />
+
+      <TaskAttachments taskId={task.id} />
 
       {!isSubtask && <Subtasks task={task} />}
 

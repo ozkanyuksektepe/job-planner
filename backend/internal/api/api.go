@@ -4,8 +4,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -36,6 +39,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks/{id}", s.getTask)
 	mux.HandleFunc("PATCH /api/tasks/{id}", s.updateTask)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.deleteTask)
+
+	mux.HandleFunc("GET /api/tasks/{id}/attachments", s.listAttachments)
+	mux.HandleFunc("POST /api/tasks/{id}/attachments", s.uploadAttachments)
+	mux.HandleFunc("GET /api/attachments/{id}/file", s.attachmentFile)
+	mux.HandleFunc("DELETE /api/attachments/{id}", s.deleteAttachment)
 
 	mux.HandleFunc("GET /api/tags", s.listTags)
 	mux.HandleFunc("POST /api/tags", s.createTag)
@@ -149,6 +157,91 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 	if id, ok := pathID(w, r); ok {
 		respondEmpty(w, s.store.DeleteTask(id))
+	}
+}
+
+// --- attachments ---
+
+func (s *Server) listAttachments(w http.ResponseWriter, r *http.Request) {
+	if id, ok := pathID(w, r); ok {
+		respond(w, http.StatusOK)(s.store.ListAttachments(id))
+	}
+}
+
+// uploadAttachments accepts multipart/form-data with one or more "file" parts and
+// streams each to disk, so large photos are never held in memory.
+func (s *Server) uploadAttachments(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 10*store.MaxAttachmentSize)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "expected multipart/form-data")
+		return
+	}
+	added := []store.Attachment{}
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid upload")
+			return
+		}
+		if part.FormName() != "file" {
+			part.Close()
+			continue
+		}
+		a, err := s.store.AddAttachment(id, part.FileName(), part)
+		part.Close()
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		added = append(added, a)
+	}
+	if len(added) == 0 {
+		writeError(w, http.StatusBadRequest, "no file uploaded")
+		return
+	}
+	writeJSON(w, http.StatusCreated, added)
+}
+
+func (s *Server) attachmentFile(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	a, path, err := s.store.AttachmentFile(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		writeStoreError(w, store.ErrNotFound)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", a.ContentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "inline; filename*=UTF-8''"+url.PathEscape(a.Filename))
+	// Stored files never change, so the browser can keep them.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	http.ServeContent(w, r, "", info.ModTime(), f)
+}
+
+func (s *Server) deleteAttachment(w http.ResponseWriter, r *http.Request) {
+	if id, ok := pathID(w, r); ok {
+		respondEmpty(w, s.store.DeleteAttachment(id))
 	}
 }
 

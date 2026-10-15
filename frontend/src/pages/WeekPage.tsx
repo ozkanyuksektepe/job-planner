@@ -69,9 +69,14 @@ export default function WeekPage() {
     ]
   }, [week.data, backlog.data, days, today, apply, defaults])
 
-  // Make sure today's column is visible (the pinned column covers the left edge).
+  // Scroll the board sideways so today's column is fully visible. Only the board's own
+  // horizontal scroll moves; scrollIntoView would also scroll the page down to a tall column.
   useEffect(() => {
-    document.querySelector(`[data-column="${today}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const column = document.querySelector<HTMLElement>(`[data-column="${today}"]`)
+    const scroller = column?.closest<HTMLElement>('[data-board-scroller]')
+    if (!column || !scroller) return
+    const overflow = column.getBoundingClientRect().right - scroller.getBoundingClientRect().right
+    if (overflow > 0) scroller.scrollLeft += overflow + 40 // 40px = the scroller's right padding
   }, [weekStart, today, week.isSuccess, backlog.isSuccess])
 
   function onMove({ task, columnId, before, after, changedColumn }: BoardMove) {

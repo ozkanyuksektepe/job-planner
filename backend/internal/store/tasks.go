@@ -21,12 +21,13 @@ type Task struct {
 	UpdatedAt     string  `json:"updated_at"`
 
 	// Derived fields for display.
-	ProjectName  *string `json:"project_name"`
-	ProjectColor *string `json:"project_color"`
-	ParentTitle  *string `json:"parent_title"`
-	SubtaskCount int      `json:"subtask_count"`
-	SubtaskDone  int      `json:"subtask_done"`
-	Tags         []TagRef `json:"tags"`
+	ProjectName     *string  `json:"project_name"`
+	ProjectColor    *string  `json:"project_color"`
+	ParentTitle     *string  `json:"parent_title"`
+	SubtaskCount    int      `json:"subtask_count"`
+	SubtaskDone     int      `json:"subtask_done"`
+	AttachmentCount int      `json:"attachment_count"`
+	Tags            []TagRef `json:"tags"`
 }
 
 type TaskInput struct {
@@ -43,10 +44,10 @@ type TaskInput struct {
 
 // TaskFilter selects tasks for ListTasks. Without ParentID or TagID only top-level tasks are returned.
 type TaskFilter struct {
-	ProjectID   *int64
-	ParentID    *int64
-	TagID       *int64 // tasks (and subtasks) carrying this tag
-	Inbox       bool   // no project and no scheduled date
+	ProjectID *int64
+	ParentID  *int64
+	TagID     *int64 // tasks (and subtasks) carrying this tag
+	Inbox     bool   // no project and no scheduled date
 	// Open top-level tasks whose day (see taskDaySQL) is before this date: the week view's "Bekleyenler".
 	BacklogBefore string
 }
@@ -61,7 +62,8 @@ SELECT t.id, t.project_id, t.parent_id, t.title, t.description, t.status, t.prio
        t.due_date, t.scheduled_date, t.sort_order, t.completed_at, t.created_at, t.updated_at,
        p.name, p.color, pt.title,
        (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id),
-       (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.status = 'done')
+       (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.status = 'done'),
+       (SELECT COUNT(*) FROM attachments a WHERE a.task_id = t.id)
 FROM tasks t
 LEFT JOIN projects p ON p.id = t.project_id
 LEFT JOIN tasks pt ON pt.id = t.parent_id`
@@ -70,7 +72,7 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description, &t.Status, &t.Priority,
 		&t.DueDate, &t.ScheduledDate, &t.SortOrder, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt,
-		&t.ProjectName, &t.ProjectColor, &t.ParentTitle, &t.SubtaskCount, &t.SubtaskDone)
+		&t.ProjectName, &t.ProjectColor, &t.ParentTitle, &t.SubtaskCount, &t.SubtaskDone, &t.AttachmentCount)
 	return t, err
 }
 
@@ -324,7 +326,11 @@ func (s *Store) UpdateTask(id int64, p Patch) (Task, error) {
 	return s.GetTask(id)
 }
 
-// DeleteTask removes the task and its subtasks (ON DELETE CASCADE).
+// DeleteTask removes the task, its subtasks and their attachments (ON DELETE CASCADE).
 func (s *Store) DeleteTask(id int64) error {
-	return affectedOrNotFound(s.db.Exec(`DELETE FROM tasks WHERE id = ?`, id))
+	if err := affectedOrNotFound(s.db.Exec(`DELETE FROM tasks WHERE id = ?`, id)); err != nil {
+		return err
+	}
+	s.cleanupAfterDelete()
+	return nil
 }

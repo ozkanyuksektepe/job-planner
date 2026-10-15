@@ -46,6 +46,7 @@ frontend/ (Vite + React 19 + TS + Tailwind v4)
   src/components/TagPicker.tsx  görev panelinde etiket seç / oluştur açılır menüsü
   src/components/NameDialog.tsx  tek alanlı isim diyaloğu (pano / alan oluşturma ve yeniden adlandırma)
   src/components/FilterBar.tsx   proje / öncelik / durum / etiket filtre çubuğu
+  src/components/TaskAttachments.tsx  görev panelindeki fotoğraf ızgarası, yükleme (seç / sürükle / ⌘V) ve büyük görüntüleyici
   src/lib/filters.ts         useTaskFilters(): filtre durumu URL'de, apply() ve yeni görev için defaults
   src/pages/                 TodayPage, InboxPage, WeekPage, BoardPage, ProjectPage (tab: tasks|notes, görünüm: liste|pano),
                              TagPage, NotesPage, NotePage
@@ -58,6 +59,7 @@ Her sayfa içeriğini `<Page width="narrow|wide|full">` ile sarar; pano görün�
 ## Veri modeli ve kurallar
 
 - Tablolar: `projects`, `tasks`, `notes` (`001_init.sql`), `tags`, `task_tags` (`002_tags.sql`), `boards`, `board_columns`, `board_items` (`003_boards.sql`).
+- **Fotoğraflar (`attachments`, `004_attachments.sql`):** Dosyalar veritabanının yanında `attachments/` klasöründe rastgele adla (`<hex>.<ext>`) durur; kullanıcının dosya adı sadece gösterim için saklanır, asla yol olarak kullanılmaz. Tür, içerikten (`http.DetectContentType`) belirlenir; yalnızca PNG/JPEG/GIF/WebP (SVG bilerek yok). Sınır `MaxAttachmentSize` (20 MB). Yükleme multipart olarak diske akıtılır. Görev veya proje silinince satırlar cascade ile gider, dosyaları `CleanupAttachments` siler (silmelerden sonra ve açılışta çalışır). Görev JSON'ında `attachment_count` var.
 - **Panolar (kullanıcı tanımlı):** Pano = kullanıcının adlandırdığı alanlar (`board_columns`). Görevin panodaki yeri `board_items` (pano başına bir satır, kendi `sort_order`'ı). `column_id` NULL: panoda ama alanda değil → açıksa "Planlanmamış"ta, bittiyse "Tamamlananlar"da görünür. "Planlanmamış" sütunu = alanı olmayan açık üyeler + `unplaced` (panoda olmayan, `scheduled_date`'i olmayan açık üst görevler). "Tamamlananlar" = panodaki `done` görevler, `completed_at`'e göre yeniden eskiye. Alan silinince görevler `ON DELETE SET NULL` ile Planlanmamış'a döner; pano silinince görevler silinmez. Bir görev aynı anda proje, etiket ve birden çok panoda olabilir.
 - `tasks.parent_id` alt görevler içindir; **yalnızca bir seviye** (alt görevin alt görevi olmaz).
 - Alt görev her zaman üst görevin projesindedir. Görevin projesi değişince alt görevleri de taşınır (`UpdateTask`).
@@ -96,7 +98,7 @@ Her sayfa içeriğini `<Page width="narrow|wide|full">` ile sarar; pano görün�
 
 ## Kişisel veriler ve test
 
-- Gerçek veritabanı: `~/.jobplanner/jobplanner.db` (proje dışında, `.gitignore` `*.db`'yi hariç tutar). Kullanıcı bunu DB Browser for SQLite ile inceliyor.
+- Gerçek veritabanı: `~/.jobplanner/jobplanner.db`, fotoğraflar `~/.jobplanner/attachments/` (proje dışında, `.gitignore` `*.db`'yi hariç tutar). Kullanıcı veritabanını DB Browser for SQLite ile inceliyor. Yedek = `~/.jobplanner` klasörünün tamamı.
 - **Testleri asla gerçek veritabanına karşı yapma.** Binary'yi geçici bir DB ve başka bir portla çalıştır: `./bin/jobplanner -addr 127.0.0.1:18080 -db <geçici-dizin>/test.db`.
 - `backend/internal/web/dist/` ve `bin/` git'e girmez. `go:embed` için `dist` klasörü var olmalı: `make dev` bunu `.gitkeep` ile, `make build` ise önce frontend'i derleyerek sağlar.
 

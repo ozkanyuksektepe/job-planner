@@ -112,7 +112,11 @@ func (s *Store) UpdateProject(id int64, p Patch) (Project, error) {
 	return s.GetProject(id)
 }
 
-// DeleteProject removes the project together with its tasks and notes (ON DELETE CASCADE).
+// DeleteProject removes the project together with its tasks, notes and attachments (ON DELETE CASCADE).
 func (s *Store) DeleteProject(id int64) error {
-	return affectedOrNotFound(s.db.Exec(`DELETE FROM projects WHERE id = ?`, id))
+	if err := affectedOrNotFound(s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)); err != nil {
+		return err
+	}
+	s.cleanupAfterDelete()
+	return nil
 }
