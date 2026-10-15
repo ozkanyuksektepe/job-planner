@@ -1,5 +1,5 @@
 import type { JSONContent } from '@tiptap/react'
-import { Pin, StickyNote } from 'lucide-react'
+import { Mic, Pin, StickyNote } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { Note } from '../lib/api'
 import { formatTimestamp } from '../lib/dates'
@@ -59,11 +59,12 @@ export default function NoteGrid({ notes, showProject = true }: { notes: Note[];
               {snippet || <span className="italic text-fg-faint">Boş not</span>}
             </p>
             <div className="mt-4 flex items-center justify-between gap-2">
-              {showProject && n.project_name ? (
-                <Chip icon={<ColorDot color={n.project_color} className="size-1.5" />}>{n.project_name}</Chip>
-              ) : (
-                <span />
-              )}
+              <span className="flex flex-wrap items-center gap-1.5">
+                {showProject && n.project_name && (
+                  <Chip icon={<ColorDot color={n.project_color} className="size-1.5" />}>{n.project_name}</Chip>
+                )}
+                {n.audio_count > 0 && <Chip icon={<Mic className="size-3" />}>{n.audio_count}</Chip>}
+              </span>
               <span className="text-[11px] text-fg-faint">{formatTimestamp(n.updated_at)}</span>
             </div>
           </Link>

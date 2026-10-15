@@ -16,40 +16,69 @@ import (
 	"unicode/utf8"
 )
 
-// MaxAttachmentSize is the largest image accepted per file.
-const MaxAttachmentSize = 20 << 20
+// Size limits per kind. Audio is larger: ~30 minutes of AAC from Safari is about 30 MB.
+const (
+	MaxImageSize = 20 << 20
+	MaxAudioSize = 100 << 20
+)
 
-// Only raster images browsers can show; SVG is excluded because it can carry scripts.
-var imageExtensions = map[string]string{
-	"image/png":  ".png",
-	"image/jpeg": ".jpg",
-	"image/gif":  ".gif",
-	"image/webp": ".webp",
+type mediaType struct {
+	kind        string // "image" or "audio"
+	contentType string // what we serve the file as
+	ext         string
 }
+
+// Keyed by http.DetectContentType's result. Only raster images browsers can show (SVG is
+// excluded because it can carry scripts) and audio containers browsers record or play.
+// Browsers' recorders write WebM / MP4 containers, which the sniffer reports as video.
+var mediaTypes = map[string]mediaType{
+	"image/png":       {"image", "image/png", ".png"},
+	"image/jpeg":      {"image", "image/jpeg", ".jpg"},
+	"image/gif":       {"image", "image/gif", ".gif"},
+	"image/webp":      {"image", "image/webp", ".webp"},
+	"video/webm":      {"audio", "audio/webm", ".webm"},
+	"video/mp4":       {"audio", "audio/mp4", ".m4a"},
+	"application/ogg": {"audio", "audio/ogg", ".ogg"},
+	"audio/mpeg":      {"audio", "audio/mpeg", ".mp3"},
+	"audio/wave":      {"audio", "audio/wav", ".wav"},
+}
+
+// AttachmentOwner says what an attachment belongs to: a task or a note.
+type AttachmentOwner struct {
+	column string // "task_id" or "note_id"; never user input
+	id     int64
+}
+
+func TaskOwner(id int64) AttachmentOwner { return AttachmentOwner{"task_id", id} }
+func NoteOwner(id int64) AttachmentOwner { return AttachmentOwner{"note_id", id} }
 
 type Attachment struct {
 	ID          int64  `json:"id"`
-	TaskID      int64  `json:"task_id"`
+	TaskID      *int64 `json:"task_id"`
+	NoteID      *int64 `json:"note_id"`
+	Kind        string `json:"kind"` // "image" or "audio"
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Size        int64  `json:"size"`
-	CreatedAt   string `json:"created_at"`
-	URL         string `json:"url"`
+	// Measured by the recorder; browsers' WebM recordings don't carry a duration themselves.
+	DurationMs *int64 `json:"duration_ms"`
+	CreatedAt  string `json:"created_at"`
+	URL        string `json:"url"`
 
 	storedName string
 }
 
-const attachmentSelect = `SELECT id, task_id, filename, stored_name, content_type, size, created_at FROM attachments`
+const attachmentSelect = `SELECT id, task_id, note_id, kind, filename, stored_name, content_type, size, duration_ms, created_at FROM attachments`
 
 func scanAttachment(row interface{ Scan(...any) error }) (Attachment, error) {
 	var a Attachment
-	err := row.Scan(&a.ID, &a.TaskID, &a.Filename, &a.storedName, &a.ContentType, &a.Size, &a.CreatedAt)
+	err := row.Scan(&a.ID, &a.TaskID, &a.NoteID, &a.Kind, &a.Filename, &a.storedName, &a.ContentType, &a.Size, &a.DurationMs, &a.CreatedAt)
 	a.URL = fmt.Sprintf("/api/attachments/%d/file", a.ID)
 	return a, err
 }
 
-func (s *Store) ListAttachments(taskID int64) ([]Attachment, error) {
-	rows, err := s.db.Query(attachmentSelect+` WHERE task_id = ? ORDER BY created_at, id`, taskID)
+func (s *Store) ListAttachments(owner AttachmentOwner) ([]Attachment, error) {
+	rows, err := s.db.Query(attachmentSelect+` WHERE `+owner.column+` = ? ORDER BY created_at, id`, owner.id)
 	if err != nil {
 		return nil, err
 	}
@@ -82,10 +111,20 @@ func (s *Store) AttachmentFile(id int64) (Attachment, string, error) {
 	return a, filepath.Join(s.attachmentsDir, a.storedName), nil
 }
 
-// AddAttachment stores an uploaded image for a task. The type is detected from the content,
-// not from the file name or the client's Content-Type.
-func (s *Store) AddAttachment(taskID int64, filename string, r io.Reader) (Attachment, error) {
-	if _, err := s.GetTask(taskID); err != nil {
+func (s *Store) checkOwner(owner AttachmentOwner) error {
+	var err error
+	if owner.column == "note_id" {
+		_, err = s.GetNote(owner.id)
+	} else {
+		_, err = s.GetTask(owner.id)
+	}
+	return err
+}
+
+// AddAttachment stores an uploaded image or audio recording. The type is detected from the
+// content, not from the file name or the client's Content-Type. durationMs is optional.
+func (s *Store) AddAttachment(owner AttachmentOwner, filename string, durationMs *int64, r io.Reader) (Attachment, error) {
+	if err := s.checkOwner(owner); err != nil {
 		return Attachment{}, err
 	}
 
@@ -95,35 +134,44 @@ func (s *Store) AddAttachment(taskID int64, filename string, r io.Reader) (Attac
 		return Attachment{}, err
 	}
 	head = head[:n]
-	contentType := http.DetectContentType(head)
-	ext, ok := imageExtensions[contentType]
+	mt, ok := mediaTypes[http.DetectContentType(head)]
 	if !ok {
-		return Attachment{}, invalid("only PNG, JPEG, GIF or WebP images can be attached")
+		return Attachment{}, invalid("only images (PNG, JPEG, GIF, WebP) or audio recordings can be attached")
+	}
+	limit := int64(MaxImageSize)
+	if mt.kind == "audio" {
+		limit = MaxAudioSize
+	} else {
+		durationMs = nil
+	}
+	if durationMs != nil && *durationMs < 0 {
+		durationMs = nil
 	}
 
 	if err := os.MkdirAll(s.attachmentsDir, 0o755); err != nil {
 		return Attachment{}, err
 	}
-	stored := randomName() + ext
+	stored := randomName() + mt.ext
 	path := filepath.Join(s.attachmentsDir, stored)
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return Attachment{}, err
 	}
-	size, err := io.Copy(f, io.LimitReader(io.MultiReader(bytes.NewReader(head), r), MaxAttachmentSize+1))
+	size, err := io.Copy(f, io.LimitReader(io.MultiReader(bytes.NewReader(head), r), limit+1))
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil && size > MaxAttachmentSize {
-		err = invalid("images must be at most %d MB", MaxAttachmentSize>>20)
+	if err == nil && size > limit {
+		err = invalid("files of this kind must be at most %d MB", limit>>20)
 	}
 	if err != nil {
 		os.Remove(path)
 		return Attachment{}, err
 	}
 
-	res, err := s.db.Exec(`INSERT INTO attachments (task_id, filename, stored_name, content_type, size) VALUES (?, ?, ?, ?, ?)`,
-		taskID, cleanFilename(filename, ext), stored, contentType, size)
+	res, err := s.db.Exec(`INSERT INTO attachments (`+owner.column+`, kind, filename, stored_name, content_type, size, duration_ms)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		owner.id, mt.kind, cleanFilename(filename, mt.ext), stored, mt.contentType, size, durationMs)
 	if err != nil {
 		os.Remove(path)
 		return Attachment{}, err

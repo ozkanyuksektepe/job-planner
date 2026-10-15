@@ -31,20 +31,33 @@ export interface Task {
   parent_title: string | null
   subtask_count: number
   subtask_done: number
-  attachment_count: number
+  image_count: number
+  audio_count: number
   tags: TagRef[]
 }
 
 export interface Attachment {
   id: number
-  task_id: number
+  task_id: number | null
+  note_id: number | null
+  kind: 'image' | 'audio'
   filename: string
   content_type: string
   size: number
+  /** recording length measured while recording; null for images and uploaded files */
+  duration_ms: number | null
   created_at: string
-  /** where the image file is served */
+  /** where the file is served */
   url: string
 }
+
+/** What attachments belong to. */
+export interface AttachmentOwner {
+  type: 'task' | 'note'
+  id: number
+}
+
+const ownerPath = (o: AttachmentOwner) => `/${o.type}s/${o.id}/attachments`
 
 export interface TagRef {
   id: number
@@ -96,6 +109,7 @@ export interface Note {
   updated_at: string
   project_name: string | null
   project_color: string | null
+  audio_count: number
 }
 
 export interface TodayView {
@@ -181,12 +195,14 @@ export const api = {
     remove: (id: number) => request<void>('DELETE', `/tasks/${id}`),
   },
   attachments: {
-    list: (taskId: number) => request<Attachment[]>('GET', `/tasks/${taskId}/attachments`),
+    list: (owner: AttachmentOwner) => request<Attachment[]>('GET', ownerPath(owner)),
     /** multipart upload; the server checks the real file type and size */
-    upload: async (taskId: number, files: File[]) => {
+    upload: async (owner: AttachmentOwner, files: File[], durationMs?: number) => {
       const form = new FormData()
+      // The server reads parts in order, so the duration must come before its file.
+      if (durationMs !== undefined) form.append('duration_ms', String(Math.round(durationMs)))
       files.forEach((f) => form.append('file', f, f.name))
-      const res = await fetch(`/api/tasks/${taskId}/attachments`, { method: 'POST', body: form })
+      const res = await fetch('/api' + ownerPath(owner), { method: 'POST', body: form })
       if (!res.ok) {
         let msg = res.statusText
         try {

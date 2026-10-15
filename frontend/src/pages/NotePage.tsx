@@ -2,6 +2,7 @@ import { ArrowLeft, Pin, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import NoteEditor from '../components/NoteEditor'
+import VoiceRecordings from '../components/VoiceRecordings'
 import { Button, ErrorBox, Page, Spinner } from '../components/ui'
 import type { Note, NotePatch } from '../lib/api'
 import { formatTimestamp } from '../lib/dates'
@@ -152,6 +153,10 @@ function NoteView({ note }: { note: Note }) {
         className="mb-2 w-full bg-transparent text-4xl font-bold tracking-tight outline-none placeholder:text-fg-faint/50"
       />
       <p className="mb-6 text-xs text-fg-faint">Son düzenleme {formatTimestamp(note.updated_at)}</p>
+
+      <div className="mb-8">
+        <VoiceRecordings owner={{ type: 'note', id: note.id }} />
+      </div>
 
       <NoteEditor content={note.content} onChange={(content) => queue({ content })} />
     </div>

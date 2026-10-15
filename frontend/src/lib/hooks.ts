@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  api, type NoteInput, type NotePatch, type Project, type ProjectInput, type TagInput, type TaskInput, type TaskListParams, type TaskPatch,
+  api, type AttachmentOwner, type NoteInput, type NotePatch, type Project, type ProjectInput, type TagInput, type TaskInput, type TaskListParams, type TaskPatch,
 } from './api'
 
 export const keys = {
@@ -11,7 +11,7 @@ export const keys = {
   taskList: (p: TaskListParams) => ['tasks', 'list', p] as const,
   today: (date: string) => ['tasks', 'today', date] as const,
   task: (id: number) => ['tasks', 'one', id] as const,
-  attachments: (taskId: number) => ['attachments', taskId] as const,
+  attachments: (owner: AttachmentOwner) => ['attachments', owner.type, owner.id] as const,
   tags: ['tags'] as const,
   tag: (id: number) => ['tags', 'one', id] as const,
   boards: ['boards'] as const,
@@ -110,33 +110,38 @@ export function useDeleteTask() {
 
 // --- attachments ---
 
-export function useAttachments(taskId: number) {
-  return useQuery({ queryKey: keys.attachments(taskId), queryFn: () => api.attachments.list(taskId) })
+export function useAttachments(owner: AttachmentOwner) {
+  return useQuery({ queryKey: keys.attachments(owner), queryFn: () => api.attachments.list(owner) })
 }
 
-/** Attachment changes also change the task's attachment_count shown in lists. */
+/** Attachment changes also change the photo / recording counts shown on tasks and notes. */
 function useInvalidateAttachments() {
   const qc = useQueryClient()
-  return (taskId: number) => {
-    qc.invalidateQueries({ queryKey: keys.attachments(taskId) })
-    qc.invalidateQueries({ queryKey: keys.tasks })
-    qc.invalidateQueries({ queryKey: keys.boards })
+  return (owner: AttachmentOwner) => {
+    qc.invalidateQueries({ queryKey: keys.attachments(owner) })
+    if (owner.type === 'task') {
+      qc.invalidateQueries({ queryKey: keys.tasks })
+      qc.invalidateQueries({ queryKey: keys.boards })
+    } else {
+      qc.invalidateQueries({ queryKey: ['notes', 'list'] })
+    }
   }
 }
 
 export function useUploadAttachments() {
   const invalidate = useInvalidateAttachments()
   return useMutation({
-    mutationFn: ({ taskId, files }: { taskId: number; files: File[] }) => api.attachments.upload(taskId, files),
-    onSettled: (_, __, { taskId }) => invalidate(taskId),
+    mutationFn: ({ owner, files, durationMs }: { owner: AttachmentOwner; files: File[]; durationMs?: number }) =>
+      api.attachments.upload(owner, files, durationMs),
+    onSettled: (_, __, { owner }) => invalidate(owner),
   })
 }
 
 export function useDeleteAttachment() {
   const invalidate = useInvalidateAttachments()
   return useMutation({
-    mutationFn: ({ id }: { id: number; taskId: number }) => api.attachments.remove(id),
-    onSuccess: (_, { taskId }) => invalidate(taskId),
+    mutationFn: ({ id }: { id: number; owner: AttachmentOwner }) => api.attachments.remove(id),
+    onSuccess: (_, { owner }) => invalidate(owner),
   })
 }
 

@@ -16,6 +16,7 @@ type Note struct {
 	UpdatedAt    string  `json:"updated_at"`
 	ProjectName  *string `json:"project_name"`
 	ProjectColor *string `json:"project_color"`
+	AudioCount   int     `json:"audio_count"`
 }
 
 type NoteInput struct {
@@ -25,13 +26,14 @@ type NoteInput struct {
 }
 
 const noteSelect = `
-SELECT n.id, n.project_id, n.title, n.content, n.pinned, n.created_at, n.updated_at, p.name, p.color
+SELECT n.id, n.project_id, n.title, n.content, n.pinned, n.created_at, n.updated_at, p.name, p.color,
+       (SELECT COUNT(*) FROM attachments a WHERE a.note_id = n.id AND a.kind = 'audio')
 FROM notes n
 LEFT JOIN projects p ON p.id = n.project_id`
 
 func scanNote(row interface{ Scan(...any) error }) (Note, error) {
 	var n Note
-	err := row.Scan(&n.ID, &n.ProjectID, &n.Title, &n.Content, &n.Pinned, &n.CreatedAt, &n.UpdatedAt, &n.ProjectName, &n.ProjectColor)
+	err := row.Scan(&n.ID, &n.ProjectID, &n.Title, &n.Content, &n.Pinned, &n.CreatedAt, &n.UpdatedAt, &n.ProjectName, &n.ProjectColor, &n.AudioCount)
 	return n, err
 }
 
@@ -100,6 +102,11 @@ func (s *Store) UpdateNote(id int64, p Patch) (Note, error) {
 	return s.GetNote(id)
 }
 
+// DeleteNote removes the note and its recordings (ON DELETE CASCADE + file cleanup).
 func (s *Store) DeleteNote(id int64) error {
-	return affectedOrNotFound(s.db.Exec(`DELETE FROM notes WHERE id = ?`, id))
+	if err := affectedOrNotFound(s.db.Exec(`DELETE FROM notes WHERE id = ?`, id)); err != nil {
+		return err
+	}
+	s.cleanupAfterDelete()
+	return nil
 }

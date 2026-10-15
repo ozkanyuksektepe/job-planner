@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Download, ImagePlus, Loader2, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type DragEvent } from 'react'
-import type { Attachment } from '../lib/api'
+import type { Attachment, AttachmentOwner } from '../lib/api'
 import { useAttachments, useDeleteAttachment, useUploadAttachments } from '../lib/hooks'
 import { CountPill, ErrorBox } from './ui'
 
@@ -10,7 +10,10 @@ const imagesOf = (files: FileList | File[] | null | undefined) => Array.from(fil
 
 /** Photo grid for a task: pick, drag & drop or paste (⌘V) images; click one to view it large. */
 export default function TaskAttachments({ taskId }: { taskId: number }) {
-  const { data: attachments = [] } = useAttachments(taskId)
+  const owner: AttachmentOwner = { type: 'task', id: taskId }
+  // Shares the cache with the task's recordings; this section only shows photos.
+  const { data: all = [] } = useAttachments(owner)
+  const attachments = all.filter((a) => a.kind === 'image')
   const upload = useUploadAttachments()
   const { mutate: uploadFiles } = upload
   const remove = useDeleteAttachment()
@@ -19,7 +22,7 @@ export default function TaskAttachments({ taskId }: { taskId: number }) {
   const [viewing, setViewing] = useState<number | null>(null)
 
   const send = (files: File[]) => {
-    if (files.length) uploadFiles({ taskId, files })
+    if (files.length) uploadFiles({ owner: { type: 'task', id: taskId }, files })
   }
 
   // Pasting an image (e.g. a screenshot) anywhere while the task is open attaches it.
@@ -28,7 +31,7 @@ export default function TaskAttachments({ taskId }: { taskId: number }) {
       const files = imagesOf(e.clipboardData?.files)
       if (files.length === 0) return
       e.preventDefault()
-      uploadFiles({ taskId, files })
+      uploadFiles({ owner: { type: 'task', id: taskId }, files })
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)
@@ -56,7 +59,7 @@ export default function TaskAttachments({ taskId }: { taskId: number }) {
               </button>
               <button
                 type="button"
-                onClick={() => confirm('Bu fotoğraf silinsin mi?') && remove.mutate({ id: a.id, taskId })}
+                onClick={() => confirm('Bu fotoğraf silinsin mi?') && remove.mutate({ id: a.id, owner })}
                 className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-lg bg-black/55 text-white opacity-0 backdrop-blur transition-opacity hover:bg-rose-600 group-hover:opacity-100"
                 title="Fotoğrafı sil"
               >

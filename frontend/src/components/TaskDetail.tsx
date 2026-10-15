@@ -6,6 +6,7 @@ import { useDeleteTask, useProjects, useTask, useTasks, useUpdateTask } from '..
 import { useTaskPanel } from '../lib/useTaskPanel'
 import QuickAdd from './QuickAdd'
 import TaskAttachments from './TaskAttachments'
+import VoiceRecordings from './VoiceRecordings'
 import TagPicker from './TagPicker'
 import { TaskCheckbox } from './TaskItem'
 import { Button, ColorDot, CountPill, ErrorBox, PRIORITY_DOTS, PRIORITY_LABELS, Segmented, Spinner, STATUS_LABELS } from './ui'
@@ -204,6 +205,10 @@ function TaskForm({ task }: { task: Task }) {
       />
 
       <TaskAttachments taskId={task.id} />
+
+      <div className="mb-7">
+        <VoiceRecordings owner={{ type: 'task', id: task.id }} />
+      </div>
 
       {!isSubtask && <Subtasks task={task} />}
 

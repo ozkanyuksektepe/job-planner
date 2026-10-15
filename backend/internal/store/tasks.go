@@ -21,13 +21,14 @@ type Task struct {
 	UpdatedAt     string  `json:"updated_at"`
 
 	// Derived fields for display.
-	ProjectName     *string  `json:"project_name"`
-	ProjectColor    *string  `json:"project_color"`
-	ParentTitle     *string  `json:"parent_title"`
-	SubtaskCount    int      `json:"subtask_count"`
-	SubtaskDone     int      `json:"subtask_done"`
-	AttachmentCount int      `json:"attachment_count"`
-	Tags            []TagRef `json:"tags"`
+	ProjectName  *string  `json:"project_name"`
+	ProjectColor *string  `json:"project_color"`
+	ParentTitle  *string  `json:"parent_title"`
+	SubtaskCount int      `json:"subtask_count"`
+	SubtaskDone  int      `json:"subtask_done"`
+	ImageCount   int      `json:"image_count"`
+	AudioCount   int      `json:"audio_count"`
+	Tags         []TagRef `json:"tags"`
 }
 
 type TaskInput struct {
@@ -63,7 +64,8 @@ SELECT t.id, t.project_id, t.parent_id, t.title, t.description, t.status, t.prio
        p.name, p.color, pt.title,
        (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id),
        (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.status = 'done'),
-       (SELECT COUNT(*) FROM attachments a WHERE a.task_id = t.id)
+       (SELECT COUNT(*) FROM attachments a WHERE a.task_id = t.id AND a.kind = 'image'),
+       (SELECT COUNT(*) FROM attachments a WHERE a.task_id = t.id AND a.kind = 'audio')
 FROM tasks t
 LEFT JOIN projects p ON p.id = t.project_id
 LEFT JOIN tasks pt ON pt.id = t.parent_id`
@@ -72,7 +74,7 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description, &t.Status, &t.Priority,
 		&t.DueDate, &t.ScheduledDate, &t.SortOrder, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt,
-		&t.ProjectName, &t.ProjectColor, &t.ParentTitle, &t.SubtaskCount, &t.SubtaskDone, &t.AttachmentCount)
+		&t.ProjectName, &t.ProjectColor, &t.ParentTitle, &t.SubtaskCount, &t.SubtaskDone, &t.ImageCount, &t.AudioCount)
 	return t, err
 }
 

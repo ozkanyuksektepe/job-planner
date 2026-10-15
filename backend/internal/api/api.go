@@ -40,8 +40,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/tasks/{id}", s.updateTask)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.deleteTask)
 
-	mux.HandleFunc("GET /api/tasks/{id}/attachments", s.listAttachments)
-	mux.HandleFunc("POST /api/tasks/{id}/attachments", s.uploadAttachments)
+	mux.HandleFunc("GET /api/tasks/{id}/attachments", s.listAttachments(store.TaskOwner))
+	mux.HandleFunc("POST /api/tasks/{id}/attachments", s.uploadAttachments(store.TaskOwner))
+	mux.HandleFunc("GET /api/notes/{id}/attachments", s.listAttachments(store.NoteOwner))
+	mux.HandleFunc("POST /api/notes/{id}/attachments", s.uploadAttachments(store.NoteOwner))
 	mux.HandleFunc("GET /api/attachments/{id}/file", s.attachmentFile)
 	mux.HandleFunc("DELETE /api/attachments/{id}", s.deleteAttachment)
 
@@ -162,26 +164,36 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 
 // --- attachments ---
 
-func (s *Server) listAttachments(w http.ResponseWriter, r *http.Request) {
-	if id, ok := pathID(w, r); ok {
-		respond(w, http.StatusOK)(s.store.ListAttachments(id))
+// listAttachments and uploadAttachments serve both tasks and notes; owner maps the {id}.
+func (s *Server) listAttachments(owner func(int64) store.AttachmentOwner) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if id, ok := pathID(w, r); ok {
+			respond(w, http.StatusOK)(s.store.ListAttachments(owner(id)))
+		}
 	}
 }
 
 // uploadAttachments accepts multipart/form-data with one or more "file" parts and
-// streams each to disk, so large photos are never held in memory.
-func (s *Server) uploadAttachments(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+// streams each to disk, so large files are never held in memory. An optional
+// "duration_ms" field sent before a file gives that recording's length.
+func (s *Server) uploadAttachments(owner func(int64) store.AttachmentOwner) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(w, r)
+		if ok {
+			s.upload(w, r, owner(id))
+		}
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 10*store.MaxAttachmentSize)
+}
+
+func (s *Server) upload(w http.ResponseWriter, r *http.Request, owner store.AttachmentOwner) {
+	r.Body = http.MaxBytesReader(w, r.Body, 2*store.MaxAudioSize)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "expected multipart/form-data")
 		return
 	}
 	added := []store.Attachment{}
+	var durationMs *int64
 	for {
 		part, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -191,12 +203,21 @@ func (s *Server) uploadAttachments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid upload")
 			return
 		}
+		if part.FormName() == "duration_ms" {
+			raw, _ := io.ReadAll(io.LimitReader(part, 32))
+			part.Close()
+			if ms, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64); err == nil {
+				durationMs = &ms
+			}
+			continue
+		}
 		if part.FormName() != "file" {
 			part.Close()
 			continue
 		}
-		a, err := s.store.AddAttachment(id, part.FileName(), part)
+		a, err := s.store.AddAttachment(owner, part.FileName(), durationMs, part)
 		part.Close()
+		durationMs = nil
 		if err != nil {
 			writeStoreError(w, err)
 			return

@@ -15,8 +15,10 @@ Tek kullanıcılıdır; giriş sistemi ve sunucu gerektirmez. Uygulama tek bir d
 - **Filtreleme:** Tüm görev listelerinde ve panolarda projeye, önceliğe, duruma ve etikete göre çoklu filtre. Filtreler adres çubuğunda saklanır; filtre açıkken eklenen görev seçili proje, öncelik ve etiketleri otomatik alır
 - **Görevler:** Durum (yapılacak / devam ediyor / tamamlandı), öncelik (düşük / orta / yüksek), planlanan gün, son tarih, açıklama
 - **Alt görevler:** Görevleri parçalara bölme ve ilerlemeyi takip etme
+- **Sesle görev ekleme:** Ekle kutularındaki mikrofon düğmesi, macOS diktesiyle (klavyedeki mikrofon tuşu) konuşarak görev yazmayı kolaylaştırır: tıklayınca kutuya odaklanır ve dikte tuşu ipucunu gösterir
 - **Fotoğraflar:** Görevlere fotoğraf ekleme (dosya seçerek, sürükle-bırak ya da ⌘V ile yapıştırarak), büyük görüntüleme ve indirme. PNG, JPEG, GIF ve WebP; fotoğraf başına en fazla 20 MB
 - **Notlar:** Notion benzeri zengin metin editörü (başlıklar, listeler, yapılacaklar listesi, alıntı, kod bloğu), Markdown kısayolları ve otomatik kayıt
+- **Ses kayıtları:** Görevlere ve notlara mikrofondan ses kaydı (duraklat / devam et, canlı ses seviyesi). Oynatıcıda başlat/duraklat, ilerleme çubuğu, ±10 sn, 0.75x–2x hız, indirme. Ses yazıya çevrilmez ve bilgisayardan dışarı çıkmaz; kayıt başına en fazla 30 dakika
 - **Tema:** Açık, koyu ya da sistem temasını takip eden görünüm
 
 ## Teknolojiler
@@ -93,7 +95,7 @@ Veritabanı varsayılan olarak proje klasörünün **dışında** tutulur. Böyl
 
 ```
 ~/.jobplanner/jobplanner.db       veritabanı
-~/.jobplanner/attachments/        görevlere eklenen fotoğraflar
+~/.jobplanner/attachments/        fotoğraflar ve ses kayıtları
 ```
 
 - `.jobplanner` gizli bir klasördür. Finder'da görmek için `Cmd + Shift + .` tuşlarına bas ya da terminalde `open ~/.jobplanner` komutunu çalıştır.
@@ -157,10 +159,10 @@ Tüm uç noktalar JSON alıp döndürür ve `/api` altındadır.
 | `GET` | `/api/tasks?backlog_before=YYYY-MM-DD` | Günü bu tarihten önce olan açık görevler (Bekleyenler) |
 | `POST` | `/api/tasks` | Görev ya da alt görev oluşturur |
 | `GET` `PATCH` `DELETE` | `/api/tasks/{id}` | Görev detayı, güncelleme, silme (alt görevleriyle birlikte) |
-| `GET` | `/api/tasks/{id}/attachments` | Görevin fotoğraflarını listeler |
-| `POST` | `/api/tasks/{id}/attachments` | Fotoğraf yükler (`multipart/form-data`, bir ya da daha çok `file` alanı) |
-| `GET` | `/api/attachments/{id}/file` | Fotoğraf dosyasını döndürür |
-| `DELETE` | `/api/attachments/{id}` | Fotoğrafı siler |
+| `GET` | `/api/tasks/{id}/attachments`, `/api/notes/{id}/attachments` | Görevin / notun fotoğraf ve ses kayıtlarını listeler |
+| `POST` | `/api/tasks/{id}/attachments`, `/api/notes/{id}/attachments` | Dosya yükler (`multipart/form-data`: bir ya da daha çok `file`; ses için önce isteğe bağlı `duration_ms`) |
+| `GET` | `/api/attachments/{id}/file` | Dosyayı döndürür (ileri sarma için Range desteğiyle) |
+| `DELETE` | `/api/attachments/{id}` | Eki siler |
 | `GET` `POST` | `/api/tags` | Etiketleri listeler / oluşturur (aynı isim varsa mevcut etiketi döndürür) |
 | `GET` `PATCH` `DELETE` | `/api/tags/{id}` | Etiket detayı, güncelleme, silme (görevler silinmez) |
 | `GET` `POST` | `/api/boards` | Panoları listeler / oluşturur |

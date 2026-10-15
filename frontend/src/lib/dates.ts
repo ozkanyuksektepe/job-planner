@@ -54,6 +54,15 @@ export function formatRelative(iso: string): string {
   return d.getFullYear() === new Date().getFullYear() ? shortFmt.format(d) : shortYearFmt.format(d)
 }
 
+/** "0:42", "12:05" or "1:02:05" for a length in milliseconds. */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = String(total % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`
+}
+
 /** Formats an API timestamp (UTC, ISO 8601) in local time. */
 export function formatTimestamp(ts: string): string {
   return dateTimeFmt.format(new Date(ts))

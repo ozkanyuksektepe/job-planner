@@ -1,4 +1,6 @@
-import { Calendar, Check, CornerDownRight, Flag, Hash, ImageIcon, ListChecks, Loader, SignalHigh, SignalLow, SignalMedium, Sun } from 'lucide-react'
+import {
+  Calendar, Check, CornerDownRight, Flag, Hash, ImageIcon, ListChecks, Loader, Mic, SignalHigh, SignalLow, SignalMedium, Sun,
+} from 'lucide-react'
 import { createContext, useContext, type ReactNode } from 'react'
 import type { Task, TagRef } from '../lib/api'
 import { formatRelative, todayISO } from '../lib/dates'
@@ -59,8 +61,11 @@ export function taskMetaChips(task: Task, { showProject = true, showSchedule = t
         {task.subtask_done}/{task.subtask_count}
       </Chip>
     ),
-    task.attachment_count > 0 && (
-      <Chip key="img" icon={<ImageIcon className="size-3" />}>{task.attachment_count}</Chip>
+    task.image_count > 0 && (
+      <Chip key="img" icon={<ImageIcon className="size-3" />}>{task.image_count}</Chip>
+    ),
+    task.audio_count > 0 && (
+      <Chip key="audio" icon={<Mic className="size-3" />}>{task.audio_count}</Chip>
     ),
     showProject && task.project_name && (
       <Chip key="proj" icon={<ColorDot color={task.project_color} className="size-1.5" />}>{task.project_name}</Chip>
