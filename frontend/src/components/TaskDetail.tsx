@@ -1,10 +1,11 @@
-import { ArrowUpLeft, Calendar, CircleDot, Flag, FolderClosed, Signal, Trash2, X } from 'lucide-react'
+import { ArrowUpLeft, Calendar, CircleDot, Flag, FolderClosed, Hash, Signal, Trash2, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Task, TaskPatch, TaskStatus } from '../lib/api'
 import { addDays, formatTimestamp, todayISO } from '../lib/dates'
 import { useDeleteTask, useProjects, useTask, useTasks, useUpdateTask } from '../lib/hooks'
 import { useTaskPanel } from '../lib/useTaskPanel'
 import QuickAdd from './QuickAdd'
+import TagPicker from './TagPicker'
 import { TaskCheckbox } from './TaskItem'
 import { Button, ColorDot, CountPill, ErrorBox, PRIORITY_DOTS, PRIORITY_LABELS, Segmented, Spinner, STATUS_LABELS } from './ui'
 
@@ -184,6 +185,10 @@ function TaskForm({ task }: { task: Task }) {
               </option>
             ))}
           </select>
+        </Field>
+
+        <Field icon={<Hash className="size-3.5" />} label="Etiketler">
+          <TagPicker value={task.tags} onChange={(tag_ids) => save({ tag_ids })} />
         </Field>
       </div>
 

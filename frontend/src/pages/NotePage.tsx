@@ -2,7 +2,7 @@ import { ArrowLeft, Pin, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import NoteEditor from '../components/NoteEditor'
-import { Button, ErrorBox, Spinner } from '../components/ui'
+import { Button, ErrorBox, Page, Spinner } from '../components/ui'
 import type { Note, NotePatch } from '../lib/api'
 import { formatTimestamp } from '../lib/dates'
 import { useDeleteNote, useNote, useProjects, useUpdateNote } from '../lib/hooks'
@@ -13,9 +13,11 @@ export default function NotePage() {
   const id = Number(useParams().noteId)
   const { data: note, isLoading, error } = useNote(id)
 
-  if (isLoading) return <Spinner />
-  if (error || !note) return <ErrorBox error={error ?? 'Not bulunamadı'} />
-  return <NoteView key={note.id} note={note} />
+  return (
+    <Page>
+      {isLoading ? <Spinner /> : error || !note ? <ErrorBox error={error ?? 'Not bulunamadı'} /> : <NoteView key={note.id} note={note} />}
+    </Page>
+  )
 }
 
 type SaveState = 'saved' | 'pending' | 'saving' | 'error'

@@ -1,8 +1,10 @@
 import { Sun } from 'lucide-react'
+import FilterBar from '../components/FilterBar'
 import QuickAdd from '../components/QuickAdd'
 import TaskList from '../components/TaskList'
-import { Button, EmptyState, ErrorBox, PageHeader, ProgressRing, Section, Spinner } from '../components/ui'
+import { Button, EmptyState, ErrorBox, PageHeader, ProgressRing, Section, Spinner, Page } from '../components/ui'
 import { formatLong, todayISO } from '../lib/dates'
+import { useTaskFilters } from '../lib/filters'
 import { useToday, useUpdateTask } from '../lib/hooks'
 
 function greeting(): string {
@@ -17,9 +19,12 @@ export default function TodayPage() {
   const date = todayISO()
   const { data, isLoading, error } = useToday(date)
   const update = useUpdateTask()
+  const filter = useTaskFilters()
+  const overdue = filter.apply(data?.overdue ?? [])
+  const todayTasks = filter.apply(data?.today ?? [])
 
   function moveOverdueToToday() {
-    for (const t of data?.overdue ?? []) {
+    for (const t of overdue) {
       update.mutate({ id: t.id, patch: { scheduled_date: date } })
     }
   }
@@ -29,7 +34,7 @@ export default function TodayPage() {
   const open = total - done
 
   return (
-    <>
+    <Page>
       <PageHeader
         eyebrow={formatLong(date)}
         title={greeting()}
@@ -53,15 +58,20 @@ export default function TodayPage() {
           )
         }
       />
-      <QuickAdd defaults={{ scheduled_date: date }} placeholder="Bugün için görev ekle…" />
+      <QuickAdd defaults={{ ...filter.defaults, scheduled_date: date }} placeholder="Bugün için görev ekle…" />
+      <FilterBar
+        state={filter}
+        shown={overdue.length + todayTasks.length}
+        total={(data?.overdue.length ?? 0) + (data?.today.length ?? 0)}
+      />
 
       {isLoading && <Spinner />}
       {error && <ErrorBox error={error} />}
 
-      {data && data.overdue.length > 0 && (
+      {overdue.length > 0 && (
         <Section
           title="Gecikmiş"
-          count={data.overdue.length}
+          count={overdue.length}
           tone="danger"
           actions={
             <Button variant="ghost" size="sm" onClick={moveOverdueToToday}>
@@ -69,12 +79,12 @@ export default function TodayPage() {
             </Button>
           }
         >
-          <TaskList tasks={data.overdue} />
+          <TaskList tasks={overdue} />
         </Section>
       )}
 
       {data && (
-        <Section title="Bugün" count={open}>
+        <Section title="Bugün" count={todayTasks.filter((t) => t.status !== 'done').length}>
           {total === 0 ? (
             <EmptyState
               icon={<Sun className="size-6" />}
@@ -82,10 +92,10 @@ export default function TodayPage() {
               hint="Yukarıdan ekleyebilir ya da herhangi bir görevin üzerindeki ☀ ile bugüne alabilirsin."
             />
           ) : (
-            <TaskList tasks={data.today} emptyText="Açık görev kalmadı" />
+            <TaskList tasks={todayTasks} emptyText={filter.active ? 'Filtreye uyan açık görev yok' : 'Açık görev kalmadı'} />
           )}
         </Section>
       )}
-    </>
+    </Page>
   )
 }

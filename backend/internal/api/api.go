@@ -37,6 +37,23 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/tasks/{id}", s.updateTask)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.deleteTask)
 
+	mux.HandleFunc("GET /api/tags", s.listTags)
+	mux.HandleFunc("POST /api/tags", s.createTag)
+	mux.HandleFunc("GET /api/tags/{id}", s.getTag)
+	mux.HandleFunc("PATCH /api/tags/{id}", s.updateTag)
+	mux.HandleFunc("DELETE /api/tags/{id}", s.deleteTag)
+
+	mux.HandleFunc("GET /api/boards", s.listBoards)
+	mux.HandleFunc("POST /api/boards", s.createBoard)
+	mux.HandleFunc("GET /api/boards/{id}", s.getBoard)
+	mux.HandleFunc("PATCH /api/boards/{id}", s.renameBoard)
+	mux.HandleFunc("DELETE /api/boards/{id}", s.deleteBoard)
+	mux.HandleFunc("POST /api/boards/{id}/columns", s.createBoardColumn)
+	mux.HandleFunc("PATCH /api/boards/{id}/columns/{columnId}", s.updateBoardColumn)
+	mux.HandleFunc("DELETE /api/boards/{id}/columns/{columnId}", s.deleteBoardColumn)
+	mux.HandleFunc("PUT /api/boards/{id}/items/{taskId}", s.placeTask)
+	mux.HandleFunc("DELETE /api/boards/{id}/items/{taskId}", s.unplaceTask)
+
 	mux.HandleFunc("GET /api/notes", s.listNotes)
 	mux.HandleFunc("POST /api/notes", s.createNote)
 	mux.HandleFunc("GET /api/notes/{id}", s.getNote)
@@ -96,7 +113,16 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	if f.ParentID, ok = queryID(w, q.Get("parent_id"), "parent_id"); !ok {
 		return
 	}
-	f.Inbox = q.Get("inbox") == "1" || q.Get("inbox") == "true"
+	if f.TagID, ok = queryID(w, q.Get("tag_id"), "tag_id"); !ok {
+		return
+	}
+	// ?from=YYYY-MM-DD&to=YYYY-MM-DD returns the tasks of a date range (week view).
+	if from, to := q.Get("from"), q.Get("to"); from != "" || to != "" {
+		respond(w, http.StatusOK)(s.store.TasksInRange(from, to))
+		return
+	}
+	f.Inbox = queryBool(q.Get("inbox"))
+	f.BacklogBefore = q.Get("backlog_before")
 	respond(w, http.StatusOK)(s.store.ListTasks(f))
 }
 
@@ -123,6 +149,119 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 	if id, ok := pathID(w, r); ok {
 		respondEmpty(w, s.store.DeleteTask(id))
+	}
+}
+
+// --- tags ---
+
+func (s *Server) listTags(w http.ResponseWriter, r *http.Request) {
+	respond(w, http.StatusOK)(s.store.ListTags())
+}
+
+func (s *Server) getTag(w http.ResponseWriter, r *http.Request) {
+	if id, ok := pathID(w, r); ok {
+		respond(w, http.StatusOK)(s.store.GetTag(id))
+	}
+}
+
+func (s *Server) createTag(w http.ResponseWriter, r *http.Request) {
+	var in store.TagInput
+	if decode(w, r, &in) {
+		respond(w, http.StatusCreated)(s.store.CreateTag(in))
+	}
+}
+
+func (s *Server) updateTag(w http.ResponseWriter, r *http.Request) {
+	var p store.Patch
+	if id, ok := pathID(w, r); ok && decode(w, r, &p) {
+		respond(w, http.StatusOK)(s.store.UpdateTag(id, p))
+	}
+}
+
+func (s *Server) deleteTag(w http.ResponseWriter, r *http.Request) {
+	if id, ok := pathID(w, r); ok {
+		respondEmpty(w, s.store.DeleteTag(id))
+	}
+}
+
+// --- boards ---
+
+func (s *Server) listBoards(w http.ResponseWriter, r *http.Request) {
+	respond(w, http.StatusOK)(s.store.ListBoards())
+}
+
+func (s *Server) getBoard(w http.ResponseWriter, r *http.Request) {
+	if id, ok := pathID(w, r); ok {
+		respond(w, http.StatusOK)(s.store.GetBoard(id))
+	}
+}
+
+func (s *Server) createBoard(w http.ResponseWriter, r *http.Request) {
+	var in store.NameInput
+	if decode(w, r, &in) {
+		respond(w, http.StatusCreated)(s.store.CreateBoard(in))
+	}
+}
+
+func (s *Server) renameBoard(w http.ResponseWriter, r *http.Request) {
+	var in store.NameInput
+	if id, ok := pathID(w, r); ok && decode(w, r, &in) {
+		respond(w, http.StatusOK)(s.store.RenameBoard(id, in))
+	}
+}
+
+func (s *Server) deleteBoard(w http.ResponseWriter, r *http.Request) {
+	if id, ok := pathID(w, r); ok {
+		respondEmpty(w, s.store.DeleteBoard(id))
+	}
+}
+
+func (s *Server) createBoardColumn(w http.ResponseWriter, r *http.Request) {
+	var in store.NameInput
+	if id, ok := pathID(w, r); ok && decode(w, r, &in) {
+		respond(w, http.StatusCreated)(s.store.CreateBoardColumn(id, in))
+	}
+}
+
+func (s *Server) updateBoardColumn(w http.ResponseWriter, r *http.Request) {
+	var p store.Patch
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if columnID, ok := pathParamID(w, r, "columnId"); ok && decode(w, r, &p) {
+		respond(w, http.StatusOK)(s.store.UpdateBoardColumn(id, columnID, p))
+	}
+}
+
+func (s *Server) deleteBoardColumn(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if columnID, ok := pathParamID(w, r, "columnId"); ok {
+		respondEmpty(w, s.store.DeleteBoardColumn(id, columnID))
+	}
+}
+
+func (s *Server) placeTask(w http.ResponseWriter, r *http.Request) {
+	var in store.PlaceInput
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if taskID, ok := pathParamID(w, r, "taskId"); ok && decode(w, r, &in) {
+		respond(w, http.StatusOK)(s.store.PlaceTask(id, taskID, in))
+	}
+}
+
+func (s *Server) unplaceTask(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if taskID, ok := pathParamID(w, r, "taskId"); ok {
+		respondEmpty(w, s.store.UnplaceTask(id, taskID))
 	}
 }
 
@@ -190,7 +329,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.As(err, &ve):
 		writeError(w, http.StatusBadRequest, ve.Msg)
 	case strings.Contains(err.Error(), "FOREIGN KEY constraint failed"):
-		writeError(w, http.StatusBadRequest, "referenced project or task does not exist")
+		writeError(w, http.StatusBadRequest, "referenced record does not exist")
 	default:
 		log.Printf("internal error: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -217,13 +356,19 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	return pathParamID(w, r, "id")
+}
+
+func pathParamID(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, "invalid "+name)
 		return 0, false
 	}
 	return id, true
 }
+
+func queryBool(raw string) bool { return raw == "1" || raw == "true" }
 
 // queryID parses an optional numeric query parameter; empty means "not set".
 func queryID(w http.ResponseWriter, raw, name string) (*int64, bool) {

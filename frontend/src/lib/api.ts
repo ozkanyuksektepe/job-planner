@@ -31,6 +31,47 @@ export interface Task {
   parent_title: string | null
   subtask_count: number
   subtask_done: number
+  tags: TagRef[]
+}
+
+export interface TagRef {
+  id: number
+  name: string
+  color: string
+}
+
+export interface Tag extends TagRef {
+  open_tasks: number
+}
+
+export interface Board {
+  id: number
+  name: string
+  created_at: string
+  open_tasks: number
+}
+
+export interface BoardColumn {
+  id: number
+  board_id: number
+  name: string
+  position: number
+}
+
+/** A task's place on a board; column_id null = on the board but in no user column. */
+export interface BoardItem {
+  task_id: number
+  column_id: number | null
+  sort_order: number
+}
+
+export interface BoardView extends Board {
+  columns: BoardColumn[]
+  items: BoardItem[]
+  /** tasks placed on the board, any status */
+  tasks: Task[]
+  /** open, unscheduled top-level tasks not on this board yet */
+  unplaced: Task[]
 }
 
 export interface Note {
@@ -54,10 +95,11 @@ export interface TodayView {
 export type ProjectInput = Pick<Project, 'name' | 'description' | 'color'>
 export type TaskInput = Partial<
   Pick<Task, 'project_id' | 'parent_id' | 'description' | 'status' | 'priority' | 'due_date' | 'scheduled_date'>
-> & { title: string }
+> & { title: string; tag_ids?: number[] }
 export type TaskPatch = Partial<
   Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'due_date' | 'scheduled_date' | 'project_id' | 'sort_order'>
->
+> & { tag_ids?: number[] }
+export type TagInput = Partial<Pick<Tag, 'name' | 'color'>>
 export type NoteInput = Partial<Pick<Note, 'project_id' | 'title' | 'content'>>
 export type NotePatch = Partial<Pick<Note, 'project_id' | 'title' | 'content' | 'pinned'>>
 
@@ -100,7 +142,13 @@ function query(params: Record<string, string | number | boolean | null | undefin
 export interface TaskListParams {
   project_id?: number
   parent_id?: number
+  tag_id?: number
   inbox?: boolean
+  /** open top-level tasks whose day (see taskDay) is before this date: the week view's "Bekleyenler" */
+  backlog_before?: string
+  /** date range (YYYY-MM-DD, inclusive) of task days (see taskDay), completed tasks included */
+  from?: string
+  to?: string
 }
 
 export const api = {
@@ -119,6 +167,27 @@ export const api = {
     create: (input: TaskInput) => request<Task>('POST', '/tasks', input),
     update: (id: number, patch: TaskPatch) => request<Task>('PATCH', `/tasks/${id}`, patch),
     remove: (id: number) => request<void>('DELETE', `/tasks/${id}`),
+  },
+  tags: {
+    list: () => request<Tag[]>('GET', '/tags'),
+    get: (id: number) => request<Tag>('GET', `/tags/${id}`),
+    create: (input: TagInput) => request<Tag>('POST', '/tags', input),
+    update: (id: number, patch: TagInput) => request<Tag>('PATCH', `/tags/${id}`, patch),
+    remove: (id: number) => request<void>('DELETE', `/tags/${id}`),
+  },
+  boards: {
+    list: () => request<Board[]>('GET', '/boards'),
+    get: (id: number) => request<BoardView>('GET', `/boards/${id}`),
+    create: (name: string) => request<Board>('POST', '/boards', { name }),
+    rename: (id: number, name: string) => request<Board>('PATCH', `/boards/${id}`, { name }),
+    remove: (id: number) => request<void>('DELETE', `/boards/${id}`),
+    createColumn: (id: number, name: string) => request<BoardColumn>('POST', `/boards/${id}/columns`, { name }),
+    updateColumn: (id: number, columnId: number, patch: Partial<Pick<BoardColumn, 'name' | 'position'>>) =>
+      request<BoardColumn>('PATCH', `/boards/${id}/columns/${columnId}`, patch),
+    removeColumn: (id: number, columnId: number) => request<void>('DELETE', `/boards/${id}/columns/${columnId}`),
+    place: (id: number, taskId: number, columnId: number | null, sortOrder?: number) =>
+      request<BoardItem>('PUT', `/boards/${id}/items/${taskId}`, { column_id: columnId, sort_order: sortOrder }),
+    unplace: (id: number, taskId: number) => request<void>('DELETE', `/boards/${id}/items/${taskId}`),
   },
   notes: {
     list: (projectId?: number) => request<Note[]>('GET', '/notes' + query({ project_id: projectId })),

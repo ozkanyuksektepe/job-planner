@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"errors"
 	"strings"
 )
@@ -25,8 +24,9 @@ type Task struct {
 	ProjectName  *string `json:"project_name"`
 	ProjectColor *string `json:"project_color"`
 	ParentTitle  *string `json:"parent_title"`
-	SubtaskCount int     `json:"subtask_count"`
-	SubtaskDone  int     `json:"subtask_done"`
+	SubtaskCount int      `json:"subtask_count"`
+	SubtaskDone  int      `json:"subtask_done"`
+	Tags         []TagRef `json:"tags"`
 }
 
 type TaskInput struct {
@@ -38,14 +38,23 @@ type TaskInput struct {
 	Priority      int     `json:"priority"`
 	DueDate       *string `json:"due_date"`
 	ScheduledDate *string `json:"scheduled_date"`
+	TagIDs        []int64 `json:"tag_ids"`
 }
 
-// TaskFilter selects tasks for ListTasks. With no ParentID only top-level tasks are returned.
+// TaskFilter selects tasks for ListTasks. Without ParentID or TagID only top-level tasks are returned.
 type TaskFilter struct {
-	ProjectID *int64
-	ParentID  *int64
-	Inbox     bool // no project and no scheduled date
+	ProjectID   *int64
+	ParentID    *int64
+	TagID       *int64 // tasks (and subtasks) carrying this tag
+	Inbox       bool   // no project and no scheduled date
+	// Open top-level tasks whose day (see taskDaySQL) is before this date: the week view's "Bekleyenler".
+	BacklogBefore string
 }
+
+// taskDaySQL is the day a task belongs to in the week view: its scheduled date, else its due date,
+// else (for top-level tasks) the local day it was created. Subtasks without dates have no day.
+const taskDaySQL = `COALESCE(t.scheduled_date, t.due_date,
+	CASE WHEN t.parent_id IS NULL THEN date(t.created_at, 'localtime') END)`
 
 const taskSelect = `
 SELECT t.id, t.project_id, t.parent_id, t.title, t.description, t.status, t.priority,
@@ -70,39 +79,79 @@ func (s *Store) queryTasks(q string, args ...any) ([]Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	out := []Task{}
 	for rows.Next() {
 		t, err := scanTask(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	// Close before the next query: the pool has a single connection.
+	rows.Close()
+	if err := s.attachTags(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) ListTasks(f TaskFilter) ([]Task, error) {
 	var where []string
 	var args []any
-	if f.ParentID != nil {
+	switch {
+	case f.ParentID != nil:
 		where = append(where, "t.parent_id = ?")
 		args = append(args, *f.ParentID)
-	} else {
+	case f.TagID != nil:
+		// subtasks can carry tags too, so don't restrict to top-level tasks
+	default:
 		where = append(where, "t.parent_id IS NULL")
 	}
 	if f.ProjectID != nil {
 		where = append(where, "t.project_id = ?")
 		args = append(args, *f.ProjectID)
 	}
+	if f.TagID != nil {
+		where = append(where, "EXISTS (SELECT 1 FROM task_tags tt WHERE tt.task_id = t.id AND tt.tag_id = ?)")
+		args = append(args, *f.TagID)
+	}
 	if f.Inbox {
 		where = append(where, "t.project_id IS NULL AND t.scheduled_date IS NULL")
 	}
+	if f.BacklogBefore != "" {
+		if err := checkDate(f.BacklogBefore); err != nil {
+			return nil, invalid("backlog_before: %v", err)
+		}
+		where = append(where, "t.status != 'done' AND "+taskDaySQL+" < ?")
+		args = append(args, f.BacklogBefore)
+	}
 
-	q := taskSelect + ` WHERE ` + strings.Join(where, " AND ") +
-		` ORDER BY t.status = 'done', t.sort_order, t.id`
+	q := taskSelect
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, " AND ")
+	}
+	q += ` ORDER BY t.status = 'done', t.sort_order, t.id`
 	return s.queryTasks(q, args...)
+}
+
+// TasksInRange returns tasks whose day (see taskDaySQL) falls between from and to (inclusive),
+// including completed ones.
+func (s *Store) TasksInRange(from, to string) ([]Task, error) {
+	if err := checkDate(from); err != nil {
+		return nil, invalid("from: %v", err)
+	}
+	if err := checkDate(to); err != nil {
+		return nil, invalid("to: %v", err)
+	}
+	return s.queryTasks(taskSelect+`
+		WHERE `+taskDaySQL+` BETWEEN ? AND ?
+		ORDER BY `+taskDaySQL+`, t.sort_order, t.id`, from, to)
 }
 
 // TodayView groups the tasks relevant for a given day.
@@ -112,14 +161,15 @@ type TodayView struct {
 	Today   []Task `json:"today"`
 }
 
-// Today returns tasks scheduled or due on date, plus unfinished tasks from earlier days.
+// Today returns the tasks whose day (see taskDaySQL) is date, plus tasks due on date and
+// unfinished tasks scheduled or due on earlier days.
 // date comes from the client so "today" follows the browser's local time zone.
 func (s *Store) Today(date string) (TodayView, error) {
 	if err := checkDate(date); err != nil {
 		return TodayView{}, invalid("date: %v", err)
 	}
 	today, err := s.queryTasks(taskSelect+`
-		WHERE (t.scheduled_date = ? OR t.due_date = ?)
+		WHERE (t.due_date = ? OR `+taskDaySQL+` = ?)
 		ORDER BY t.status = 'done', t.priority DESC, t.sort_order, t.id`, date, date)
 	if err != nil {
 		return TodayView{}, err
@@ -136,11 +186,14 @@ func (s *Store) Today(date string) (TodayView, error) {
 }
 
 func (s *Store) GetTask(id int64) (Task, error) {
-	t, err := scanTask(s.db.QueryRow(taskSelect+` WHERE t.id = ?`, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		return t, ErrNotFound
+	tasks, err := s.queryTasks(taskSelect+` WHERE t.id = ?`, id)
+	if err != nil {
+		return Task{}, err
 	}
-	return t, err
+	if len(tasks) == 0 {
+		return Task{}, ErrNotFound
+	}
+	return tasks[0], nil
 }
 
 func validStatus(s string) bool { return s == "todo" || s == "doing" || s == "done" }
@@ -181,7 +234,13 @@ func (s *Store) CreateTask(in TaskInput) (Task, error) {
 		in.ProjectID = parent.ProjectID
 	}
 
-	res, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Task{}, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`
 		INSERT INTO tasks (project_id, parent_id, title, description, status, priority,
 		                   due_date, scheduled_date, sort_order, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks),
@@ -192,10 +251,22 @@ func (s *Store) CreateTask(in TaskInput) (Task, error) {
 		return Task{}, err
 	}
 	id, _ := res.LastInsertId()
+	if len(in.TagIDs) > 0 {
+		if err := setTaskTags(tx, id, in.TagIDs); err != nil {
+			return Task{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Task{}, err
+	}
 	return s.GetTask(id)
 }
 
 func (s *Store) UpdateTask(id int64, p Patch) (Task, error) {
+	tagIDs, hasTags, err := takeTagIDs(p)
+	if err != nil {
+		return Task{}, err
+	}
 	sets, args, vals, err := buildSet(p, map[string]fieldKind{
 		"title":          kRequiredString,
 		"description":    kString,
@@ -222,7 +293,7 @@ func (s *Store) UpdateTask(id int64, p Patch) (Task, error) {
 	if pr, ok := vals["priority"]; ok && (pr.(int) < 0 || pr.(int) > 3) {
 		return Task{}, invalid("priority must be between 0 and 3")
 	}
-	if len(sets) == 0 {
+	if len(sets) == 0 && !hasTags {
 		return s.GetTask(id)
 	}
 
@@ -235,6 +306,11 @@ func (s *Store) UpdateTask(id int64, p Patch) (Task, error) {
 	sets = append(sets, "updated_at = "+nowSQL)
 	if err := affectedOrNotFound(tx.Exec(`UPDATE tasks SET `+strings.Join(sets, ", ")+` WHERE id = ?`, append(args, id)...)); err != nil {
 		return Task{}, err
+	}
+	if hasTags {
+		if err := setTaskTags(tx, id, tagIDs); err != nil {
+			return Task{}, err
+		}
 	}
 	// Moving a task to another project takes its subtasks along.
 	if pid, ok := vals["project_id"]; ok {

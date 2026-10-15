@@ -1,13 +1,15 @@
 import { CornerDownLeft, Plus } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import type { TaskInput } from '../lib/api'
+import type { Task, TaskInput } from '../lib/api'
 import { useCreateTask } from '../lib/hooks'
 
 /** One-line task input; `defaults` decide where the new task lands (project, day, parent). */
-export default function QuickAdd({ defaults, placeholder = 'Görev ekle…', compact = false }: {
+export default function QuickAdd({ defaults, placeholder = 'Görev ekle…', compact = false, onCreated }: {
   defaults?: Omit<TaskInput, 'title'>
   placeholder?: string
   compact?: boolean
+  /** called with the new task, e.g. to place it on a board */
+  onCreated?: (task: Task) => void
 }) {
   const [title, setTitle] = useState('')
   const create = useCreateTask()
@@ -16,7 +18,7 @@ export default function QuickAdd({ defaults, placeholder = 'Görev ekle…', com
     e.preventDefault()
     const t = title.trim()
     if (!t) return
-    create.mutate({ ...defaults, title: t })
+    create.mutate({ ...defaults, title: t }, { onSuccess: onCreated })
     setTitle('')
   }
 
@@ -37,7 +39,7 @@ export default function QuickAdd({ defaults, placeholder = 'Görev ekle…', com
   return (
     <form
       onSubmit={submit}
-      className="group mb-8 flex h-12 items-center gap-3 rounded-xl border border-line bg-surface-2 px-3.5 shadow-xs transition-all focus-within:border-accent/50 focus-within:bg-surface focus-within:ring-4 focus-within:ring-accent/10"
+      className="group mb-4 flex h-12 items-center gap-3 rounded-xl border border-line bg-surface-2 px-3.5 shadow-xs transition-all focus-within:border-accent/50 focus-within:bg-surface focus-within:ring-4 focus-within:ring-accent/10"
     >
       <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-fg transition-colors group-focus-within:bg-accent group-focus-within:text-white">
         <Plus className="size-3.5" strokeWidth={2.5} />

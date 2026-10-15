@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type NoteInput, type NotePatch, type Project, type ProjectInput, type TaskInput, type TaskListParams, type TaskPatch } from './api'
+import {
+  api, type NoteInput, type NotePatch, type Project, type ProjectInput, type TagInput, type TaskInput, type TaskListParams, type TaskPatch,
+} from './api'
 
 export const keys = {
   projects: ['projects'] as const,
@@ -9,6 +11,10 @@ export const keys = {
   taskList: (p: TaskListParams) => ['tasks', 'list', p] as const,
   today: (date: string) => ['tasks', 'today', date] as const,
   task: (id: number) => ['tasks', 'one', id] as const,
+  tags: ['tags'] as const,
+  tag: (id: number) => ['tags', 'one', id] as const,
+  boards: ['boards'] as const,
+  board: (id: number) => ['boards', 'one', id] as const,
   notes: ['notes'] as const,
   noteList: (projectId?: number) => ['notes', 'list', projectId ?? 'all'] as const,
   note: (id: number) => ['notes', 'one', id] as const,
@@ -72,12 +78,14 @@ export function useTask(id: number | null) {
   })
 }
 
-/** Any task change can affect lists, today view, parent subtask counts and project counts. */
+/** Any task change can affect lists, today view, parent subtask counts and project / tag counts. */
 function useInvalidateTasks() {
   const qc = useQueryClient()
   return () => {
     qc.invalidateQueries({ queryKey: keys.tasks })
     qc.invalidateQueries({ queryKey: keys.projects })
+    qc.invalidateQueries({ queryKey: keys.tags })
+    qc.invalidateQueries({ queryKey: keys.boards })
   }
 }
 
@@ -98,6 +106,81 @@ export function useDeleteTask() {
   const invalidate = useInvalidateTasks()
   return useMutation({ mutationFn: (id: number) => api.tasks.remove(id), onSuccess: invalidate })
 }
+
+// --- tags ---
+
+export function useTags() {
+  return useQuery({ queryKey: keys.tags, queryFn: api.tags.list })
+}
+
+export function useTag(id: number) {
+  return useQuery({ queryKey: keys.tag(id), queryFn: () => api.tags.get(id) })
+}
+
+export function useCreateTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: TagInput) => api.tags.create(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.tags }),
+  })
+}
+
+export function useUpdateTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: TagInput }) => api.tags.update(id, patch),
+    onSuccess: () => {
+      // Tag name/color is embedded in tasks.
+      qc.invalidateQueries({ queryKey: keys.tags })
+      qc.invalidateQueries({ queryKey: keys.tasks })
+    },
+  })
+}
+
+export function useDeleteTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.tags.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.tags })
+      qc.invalidateQueries({ queryKey: keys.tasks })
+    },
+  })
+}
+
+// --- boards ---
+
+export function useBoards() {
+  return useQuery({ queryKey: keys.boards, queryFn: api.boards.list })
+}
+
+export function useBoard(id: number) {
+  return useQuery({ queryKey: keys.board(id), queryFn: () => api.boards.get(id) })
+}
+
+/** Wraps a board API call in a mutation that refreshes all board queries afterwards. */
+function useBoardMutation<V, R>(fn: (vars: V) => Promise<R>) {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: fn, onSuccess: () => qc.invalidateQueries({ queryKey: keys.boards }) })
+}
+
+export const useCreateBoard = () => useBoardMutation((name: string) => api.boards.create(name))
+export const useRenameBoard = () => useBoardMutation(({ id, name }: { id: number; name: string }) => api.boards.rename(id, name))
+export const useDeleteBoard = () => useBoardMutation((id: number) => api.boards.remove(id))
+export const useCreateBoardColumn = () =>
+  useBoardMutation(({ boardId, name }: { boardId: number; name: string }) => api.boards.createColumn(boardId, name))
+export const useRenameBoardColumn = () =>
+  useBoardMutation(({ boardId, columnId, name }: { boardId: number; columnId: number; name: string }) =>
+    api.boards.updateColumn(boardId, columnId, { name }),
+  )
+export const useDeleteBoardColumn = () =>
+  useBoardMutation(({ boardId, columnId }: { boardId: number; columnId: number }) => api.boards.removeColumn(boardId, columnId))
+export const usePlaceTask = () =>
+  useBoardMutation(({ boardId, taskId, columnId, sortOrder }: { boardId: number; taskId: number; columnId: number | null; sortOrder?: number }) =>
+    api.boards.place(boardId, taskId, columnId, sortOrder),
+  )
+export const useUnplaceTask = () =>
+  useBoardMutation(({ boardId, taskId }: { boardId: number; taskId: number }) => api.boards.unplace(boardId, taskId))
 
 // --- notes ---
 

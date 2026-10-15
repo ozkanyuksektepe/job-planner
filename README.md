@@ -6,9 +6,13 @@ Tek kullanıcılıdır; giriş sistemi ve sunucu gerektirmez. Uygulama tek bir d
 
 ## Özellikler
 
-- **Bugün:** Bugüne planlanan ya da son tarihi bugün olan görevler, gecikmiş işler ve günlük ilerleme halkası
+- **Bugün:** Bugüne planlanan, son tarihi bugün olan ya da tarihsiz olup bugün açılan görevler; gecikmiş işler ve günlük ilerleme halkası
 - **Gelen Kutusu:** Henüz bir projeye ya da güne atanmamış işler; aklına geleni hızlıca yazıp sonra planlamak için
-- **Projeler:** Renk, açıklama, ilerleme çubuğu, arşivleme; her projenin kendi görevleri ve notları
+- **Bu Hafta:** Pazartesi'den Pazar'a gün sütunları. Her görev planlandığı güne (yoksa son tarihine, o da yoksa açıldığı güne) düşer; tamamlananlar işaretli görünür. Önceki haftalardan kalan açık işler solda "Bekleyenler"de durur; görevler sürükleyerek başka güne taşınabilir
+- **Panolar:** Kendi adlandırdığın alanlardan (ör. Yapılacaklar, Önemli) oluşan sürükle-bırak panolar. Solda Planlanmamış, en sağda Tamamlananlar; işaretlenen görev otomatik olarak Tamamlananlar'a geçer
+- **Projeler:** Renk, açıklama, ilerleme çubuğu, arşivleme; her projenin kendi görevleri ve notları. Görevler liste ya da durum sütunlu kanban panosu olarak görüntülenebilir
+- **Etiketler:** Görevlere renkli etiketler; her etiketin kendi sayfası
+- **Filtreleme:** Tüm görev listelerinde ve panolarda projeye, önceliğe, duruma ve etikete göre çoklu filtre. Filtreler adres çubuğunda saklanır; filtre açıkken eklenen görev seçili proje, öncelik ve etiketleri otomatik alır
 - **Görevler:** Durum (yapılacak / devam ediyor / tamamlandı), öncelik (düşük / orta / yüksek), planlanan gün, son tarih, açıklama
 - **Alt görevler:** Görevleri parçalara bölme ve ilerlemeyi takip etme
 - **Notlar:** Notion benzeri zengin metin editörü (başlıklar, listeler, yapılacaklar listesi, alıntı, kod bloğu), Markdown kısayolları ve otomatik kayıt
@@ -23,6 +27,7 @@ Tek kullanıcılıdır; giriş sistemi ve sunucu gerektirmez. Uygulama tek bir d
 | Frontend | React, TypeScript, Vite |
 | Arayüz | Tailwind CSS, lucide ikonları, Inter yazı tipi |
 | Veri yönetimi | TanStack Query |
+| Sürükle-bırak | dnd-kit |
 | Not editörü | TipTap |
 
 Frontend build edildikten sonra `go:embed` ile Go binary'sinin içine gömülür. Bu yüzden uygulamayı çalıştırmak için tek bir dosya yeterlidir.
@@ -145,9 +150,18 @@ Tüm uç noktalar JSON alıp döndürür ve `/api` altındadır.
 | `GET` | `/api/projects?status=active\|archived` | Projeleri listeler |
 | `POST` | `/api/projects` | Proje oluşturur |
 | `GET` `PATCH` `DELETE` | `/api/projects/{id}` | Proje detayı, güncelleme, silme (görevleri ve notlarıyla birlikte) |
-| `GET` | `/api/tasks?project_id=&parent_id=&inbox=1` | Görevleri listeler |
+| `GET` | `/api/tasks?project_id=&parent_id=&tag_id=&inbox=1` | Görevleri listeler |
+| `GET` | `/api/tasks?from=YYYY-MM-DD&to=YYYY-MM-DD` | Günü bu aralığa düşen görevler, tamamlananlar dahil (gün: planlanan gün, yoksa son tarih, yoksa açıldığı gün) |
+| `GET` | `/api/tasks?backlog_before=YYYY-MM-DD` | Günü bu tarihten önce olan açık görevler (Bekleyenler) |
 | `POST` | `/api/tasks` | Görev ya da alt görev oluşturur |
 | `GET` `PATCH` `DELETE` | `/api/tasks/{id}` | Görev detayı, güncelleme, silme (alt görevleriyle birlikte) |
+| `GET` `POST` | `/api/tags` | Etiketleri listeler / oluşturur (aynı isim varsa mevcut etiketi döndürür) |
+| `GET` `PATCH` `DELETE` | `/api/tags/{id}` | Etiket detayı, güncelleme, silme (görevler silinmez) |
+| `GET` `POST` | `/api/boards` | Panoları listeler / oluşturur |
+| `GET` `PATCH` `DELETE` | `/api/boards/{id}` | Pano detayı (alanlar, yerleşimler, görevler), yeniden adlandırma, silme |
+| `POST` | `/api/boards/{id}/columns` | Panoya alan ekler |
+| `PATCH` `DELETE` | `/api/boards/{id}/columns/{columnId}` | Alanı yeniden adlandırır / siler (görevler Planlanmamış'a döner) |
+| `PUT` `DELETE` | `/api/boards/{id}/items/{taskId}` | Görevi panoda bir alana yerleştirir / panodan çıkarır |
 | `GET` | `/api/notes?project_id=` | Notları listeler |
 | `POST` | `/api/notes` | Not oluşturur |
 | `GET` `PATCH` `DELETE` | `/api/notes/{id}` | Not detayı, güncelleme, silme |
@@ -158,8 +172,10 @@ Tüm uç noktalar JSON alıp döndürür ve `/api` altındadır.
 curl -X PATCH http://127.0.0.1:8080/api/tasks/1 -d '{"status":"done"}'
 ```
 
+Görevin etiketleri `tag_ids` ile tamamen değiştirilir: `{"tag_ids": [1, 3]}`.
+
 ## Yol haritası
 
 - [x] **Faz 1:** Bugün ekranı, Gelen Kutusu, projeler, görevler, alt görevler, zengin metinli notlar, açık/koyu tema
-- [ ] **Faz 2:** Kanban görünümü, sürükle-bırak, haftalık planlama, etiketler
+- [x] **Faz 2:** Etiketler, proje kanban görünümü, haftalık planlama, kendi alanlarınla panolar (hepsinde sürükle-bırak)
 - [ ] **Faz 3:** `Cmd + K` ile arama ve hızlı ekleme, klavye kısayolları, otomatik veritabanı yedeği, bilgisayar açılınca otomatik başlatma

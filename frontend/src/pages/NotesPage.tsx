@@ -1,7 +1,7 @@
 import { Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import NoteGrid from '../components/NoteGrid'
-import { Button, ErrorBox, PageHeader, Spinner } from '../components/ui'
+import { Button, ErrorBox, PageHeader, Spinner, Page } from '../components/ui'
 import { useCreateNote, useNotes } from '../lib/hooks'
 
 export default function NotesPage() {
@@ -15,7 +15,7 @@ export default function NotesPage() {
   }
 
   return (
-    <>
+    <Page>
       <PageHeader
         eyebrow={data ? `${data.length} not` : undefined}
         title="Notlar"
@@ -29,6 +29,6 @@ export default function NotesPage() {
       {isLoading && <Spinner />}
       {error && <ErrorBox error={error} />}
       {data && <NoteGrid notes={data} />}
-    </>
+    </Page>
   )
 }

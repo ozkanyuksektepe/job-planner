@@ -40,15 +40,25 @@ frontend/ (Vite + React 19 + TS + Tailwind v4)
   src/lib/dates.ts           local YYYY-MM-DD yardımcıları, tr-TR formatlama
   src/lib/theme.ts           açık/koyu/sistem tema (localStorage 'theme', <html class="dark">)
   src/lib/useTaskPanel.ts    görev detay paneli URL'de (?task=ID) tutulur
-  src/components/ui.tsx      ortak primitive'ler: Button, Chip, CountPill, Segmented, Section, PageHeader, ProgressRing…
-  src/pages/                 TodayPage, InboxPage, ProjectPage (tab: tasks|notes), NotesPage, NotePage
+  src/components/ui.tsx      ortak primitive'ler: Page, Button, Chip, CountPill, Segmented, Section, PageHeader, ProgressRing…
+  src/components/TaskItem.tsx  liste satırı + paylaşılan parçalar: TaskCheckbox, PriorityBadge, TagChip, taskMetaChips()
+  src/components/Board.tsx   dnd-kit ile sürükle-bırak sütunlu pano (kanban ve hafta görünümü bunu paylaşır)
+  src/components/TagPicker.tsx  görev panelinde etiket seç / oluştur açılır menüsü
+  src/components/NameDialog.tsx  tek alanlı isim diyaloğu (pano / alan oluşturma ve yeniden adlandırma)
+  src/components/FilterBar.tsx   proje / öncelik / durum / etiket filtre çubuğu
+  src/lib/filters.ts         useTaskFilters(): filtre durumu URL'de, apply() ve yeni görev için defaults
+  src/pages/                 TodayPage, InboxPage, WeekPage, BoardPage, ProjectPage (tab: tasks|notes, görünüm: liste|pano),
+                             TagPage, NotesPage, NotePage
 ```
 
-Rotalar: `/today`, `/inbox`, `/projects/:id`, `/projects/:id/notes`, `/notes`, `/notes/:id`.
+Rotalar: `/today`, `/inbox`, `/week`, `/boards/:id`, `/projects/:id`, `/projects/:id/notes`, `/tags/:id`, `/notes`, `/notes/:id`.
+
+Her sayfa içeriğini `<Page width="narrow|wide|full">` ile sarar; pano görünümleri daha geniş alan kullanır.
 
 ## Veri modeli ve kurallar
 
-- Tablolar: `projects`, `tasks`, `notes` (şema: `backend/internal/db/migrations/001_init.sql`).
+- Tablolar: `projects`, `tasks`, `notes` (`001_init.sql`), `tags`, `task_tags` (`002_tags.sql`), `boards`, `board_columns`, `board_items` (`003_boards.sql`).
+- **Panolar (kullanıcı tanımlı):** Pano = kullanıcının adlandırdığı alanlar (`board_columns`). Görevin panodaki yeri `board_items` (pano başına bir satır, kendi `sort_order`'ı). `column_id` NULL: panoda ama alanda değil → açıksa "Planlanmamış"ta, bittiyse "Tamamlananlar"da görünür. "Planlanmamış" sütunu = alanı olmayan açık üyeler + `unplaced` (panoda olmayan, `scheduled_date`'i olmayan açık üst görevler). "Tamamlananlar" = panodaki `done` görevler, `completed_at`'e göre yeniden eskiye. Alan silinince görevler `ON DELETE SET NULL` ile Planlanmamış'a döner; pano silinince görevler silinmez. Bir görev aynı anda proje, etiket ve birden çok panoda olabilir.
 - `tasks.parent_id` alt görevler içindir; **yalnızca bir seviye** (alt görevin alt görevi olmaz).
 - Alt görev her zaman üst görevin projesindedir. Görevin projesi değişince alt görevleri de taşınır (`UpdateTask`).
 - `priority`: 0 yok, 1 düşük, 2 orta, 3 yüksek. `status`: `todo` | `doing` | `done`. `done` olunca `completed_at` set edilir.
@@ -56,6 +66,10 @@ Rotalar: `/today`, `/inbox`, `/projects/:id`, `/projects/:id/notes`, `/notes`, `
 - Gelen Kutusu = projesi ve `scheduled_date`'i olmayan üst seviye görevler.
 - Proje silinince görevleri ve notları da silinir (`ON DELETE CASCADE`). Görev silinince alt görevleri de silinir.
 - `notes.content` TipTap JSON'ı string olarak tutar.
+- **Etiketler:** isim benzersiz ve büyük/küçük harfe duyarsız; `POST /api/tags` aynı isim varsa mevcut etiketi döndürür. Görevin etiketleri `tag_ids` ile **tamamen değiştirilir** (create ve PATCH'te). Her görev JSON'ında `tags: [{id,name,color}]` gelir (`attachTags` ek bir sorguyla doldurur). Etiket silinince görevler silinmez.
+- **Görevin günü (Bugün ve hafta görünümü):** `scheduled_date` → yoksa `due_date` → yoksa (üst görevlerde) `created_at`'in **yerel** günü. Backend'de `taskDaySQL`, frontend'de `taskDay()` (lib/dates.ts); ikisi aynı kalmalı. Bugün listesi = günü bugün olanlar + son tarihi bugün olanlar. Görevlere otomatik `scheduled_date` yazılmaz (Gelen Kutusu bozulmasın diye); oluşturulma günü yalnızca gösterim için kullanılır. Gecikmiş listesi sadece gerçek tarihlere (`scheduled_date` / `due_date`) bakar.
+- **Hafta sorguları:** `GET /api/tasks?from=&to=` günü aralığa düşen görevleri tamamlananlar dahil döner (tarihi olan alt görevler de gelir). `?backlog_before=` günü o tarihten önce olan açık üst görevleri döner ("Bekleyenler" sütunu). Bekleyenler'e sürüklemek `scheduled_date`'i temizler. `?tag_id=` alt görevleri de içerir.
+- `queryTasks` satırları kapattıktan **sonra** ek sorgu yapar: havuzda tek bağlantı olduğu için açık `rows` varken ikinci sorgu kilitlenir. Yeni sorgu yazarken buna dikkat et.
 - **PATCH semantiği:** yalnızca gönderilen alanlar değişir; `null` alanı temizler; bilinmeyen alan 400 döner. Yeni bir güncellenebilir alan eklerken `store` içindeki `buildSet` izin haritasına eklenmeli.
 - **Şema değişikliği:** mevcut migration dosyasını asla düzenleme; yeni numaralı dosya ekle (`002_....sql`). Migration'lar sırayla ve bir kez uygulanır.
 - Tek kullanıcı olduğundan `SetMaxOpenConns(1)` bilinçli bir tercih; SQLite WAL modunda.
@@ -65,6 +79,11 @@ Rotalar: `/today`, `/inbox`, `/projects/:id`, `/projects/:id/notes`, `/notes`, `
 - Task mutasyonları `['tasks']` ve `['projects']` sorgularını invalid eder (sayaçlar ve listeler güncel kalsın).
 - Not editörü içeriğini kendisi yönetir: not güncellenince detay sorgusu **refetch edilmez**, `setQueryData` ile güncellenir; yalnızca listeler invalid edilir. Otomatik kayıt `NotePage` içindeki `useAutosave` ile (700 ms debounce, sayfadan çıkarken flush).
 - TipTap v3: `@tiptap/starter-kit`, `@tiptap/extension-list` (TaskList/TaskItem), `@tiptap/extensions` (Placeholder).
+- **Board:** `columns` prop'u çağıran tarafta `useMemo` ile üretilmeli; yeni dizi gelince yerel sıralama sunucu verisine sıfırlanır. Bırakınca `onMove({task, columnId, before, after, changedColumn})` çağrılır; yeni sıra `sortOrderBetween(before, after)` ile komşuların ortası olarak hesaplanır. Kanban'da sütun = `status`, hafta görünümünde sütun = gün (`backlog` sütunu "Bekleyenler": tarihi temizler ve `pinned` ile solda sabit durur). Kartlardaki checkbox `onPointerDown`'u durdurur ki tıklama sürüklemeyi başlatmasın.
+- Proje görünüm tercihi (liste/pano) `localStorage` `projectView` anahtarında.
+- **Filtreler** tamamen istemci tarafında: `useTaskFilters(hidden)` URL parametrelerini okur (`?project=1,none&priority=3&status=todo&tag=2`; aynı filtre içinde VEYA, filtreler arasında VE). Anlamsız olduğu sayfada filtre `hidden` ile gizlenir (proje sayfasında `project`, kanban'da ayrıca `status`, Gelen Kutusu'nda `project`, etiket sayfasında `tag`). `apply` ve `defaults` filtre değişmedikçe kararlıdır, Board `columns` memo'sunda kullanılabilir. Filtre açıkken QuickAdd'e `filter.defaults` verilir ki yeni görev filtreye uysun. Yeni bir görev listesi sayfası eklenirse FilterBar'ı da ekle.
+- `BoardPage` checkbox davranışını `TaskCompleteContext` ile devralır: işaretlenen görev panoda değilse `column_id: null` ile panoya eklenir, böylece Tamamlananlar'a düşer; işaret kaldırılınca eski alanına döner. Context yoksa checkbox sadece durumu değiştirir.
+- `useMemo` bağımlılıklarına mutasyon nesnesi (`useMutation()` sonucu) koyma; her durum değişiminde yenilenir ve Board'u sıfırlar. Kararlı olan `mutate` fonksiyonunu kullan.
 - Onay diyalogları şimdilik `window.confirm`.
 
 ## Tasarım dili (kullanıcı onayladı, korunmalı)
@@ -84,7 +103,7 @@ Rotalar: `/today`, `/inbox`, `/projects/:id`, `/projects/:id/notes`, `/notes`, `
 ## Yol haritası
 
 - [x] Faz 1: Bugün, Gelen Kutusu, projeler, görevler, alt görevler, zengin notlar, açık/koyu tema, öncelik badge'leri
-- [ ] Faz 2: Kanban görünümü (Todo/Doing/Done), sürükle-bırak (dnd-kit), haftalık planlama, etiketler
+- [x] Faz 2: Etiketler, proje kanban görünümü (sürükle-bırak ile durum ve sıra), haftalık planlama (günlere sürükle-bırak), kullanıcı tanımlı panolar (alanlar + Planlanmamış + Tamamlananlar). Liste görünümünde sürükleyerek sıralama ve pano alanlarını sürükleyerek yeniden sıralama henüz yok.
 - [ ] Faz 3: `Cmd + K` arama ve hızlı ekleme, klavye kısayolları, otomatik DB yedeği, macOS'ta açılışta otomatik başlatma (launchd)
 
 ## Çalışma şekli

@@ -1,10 +1,11 @@
-import { Archive, ChevronRight, Inbox, Monitor, Moon, NotebookPen, Plus, Sun, SunMedium } from 'lucide-react'
+import { Archive, CalendarDays, ChevronRight, Columns3, Hash, Inbox, Monitor, Moon, NotebookPen, Plus, Sun, SunMedium } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { todayISO } from '../lib/dates'
-import { useProjects, useTasks, useToday } from '../lib/hooks'
+import { useBoards, useCreateBoard, useProjects, useTags, useTasks, useToday } from '../lib/hooks'
 import { useTheme, type ThemePref } from '../lib/theme'
 import { useTaskPanel } from '../lib/useTaskPanel'
+import NameDialog from './NameDialog'
 import ProjectDialog from './ProjectDialog'
 import TaskDetail from './TaskDetail'
 import { ColorDot } from './ui'
@@ -65,6 +66,10 @@ export default function Layout() {
   const { data: projects = [] } = useProjects()
   const { data: today } = useToday(todayISO())
   const { data: inbox } = useTasks({ inbox: true })
+  const { data: tags = [] } = useTags()
+  const { data: boards = [] } = useBoards()
+  const createBoard = useCreateBoard()
+  const [creatingBoard, setCreatingBoard] = useState(false)
   const [creating, setCreating] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const navigate = useNavigate()
@@ -90,10 +95,39 @@ export default function Layout() {
         <nav className="flex flex-col gap-0.5">
           <NavItem to="/today" icon={<Sun className="size-4" />} badge={todayOpen}>Bugün</NavItem>
           <NavItem to="/inbox" icon={<Inbox className="size-4" />} badge={inboxOpen}>Gelen Kutusu</NavItem>
+          <NavItem to="/week" icon={<CalendarDays className="size-4" />}>Bu Hafta</NavItem>
           <NavItem to="/notes" icon={<NotebookPen className="size-4" />} end>Notlar</NavItem>
         </nav>
 
         <div className="mt-7 flex items-center justify-between px-2.5 pb-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-faint">Panolar</span>
+          <button
+            type="button"
+            onClick={() => setCreatingBoard(true)}
+            className="flex size-5 items-center justify-center rounded-md text-fg-faint transition-colors hover:bg-hover hover:text-fg"
+            title="Yeni pano"
+          >
+            <Plus className="size-3.5" />
+          </button>
+        </div>
+        <nav className="flex flex-col gap-0.5">
+          {boards.map((b) => (
+            <NavItem key={b.id} to={`/boards/${b.id}`} icon={<Columns3 className="size-4" />} badge={b.open_tasks}>
+              {b.name}
+            </NavItem>
+          ))}
+          {boards.length === 0 && (
+            <button
+              type="button"
+              onClick={() => setCreatingBoard(true)}
+              className="flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-[13px] text-fg-faint transition-colors hover:bg-hover hover:text-fg-muted"
+            >
+              <Plus className="size-4" /> Pano oluştur
+            </button>
+          )}
+        </nav>
+
+        <div className="mt-6 flex items-center justify-between px-2.5 pb-1.5">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-faint">Projeler</span>
           <button
             type="button"
@@ -139,6 +173,22 @@ export default function Layout() {
                 ))}
             </>
           )}
+
+          {tags.length > 0 && (
+            <>
+              <div className="mt-6 px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg-faint">Etiketler</div>
+              {tags.map((t) => (
+                <NavItem
+                  key={t.id}
+                  to={`/tags/${t.id}`}
+                  icon={<Hash className="size-3.5" strokeWidth={2.5} style={{ color: t.color }} />}
+                  badge={t.open_tasks}
+                >
+                  {t.name}
+                </NavItem>
+              ))}
+            </>
+          )}
         </nav>
 
         <ThemeToggle />
@@ -146,13 +196,24 @@ export default function Layout() {
 
       <main className="min-w-0 flex-1 py-2 pr-2">
         <div className="h-full overflow-y-auto rounded-2xl border border-line bg-surface shadow-sm">
-          <div className="mx-auto max-w-3xl px-10 pb-16 pt-12">
-            <Outlet />
-          </div>
+          <Outlet />
         </div>
       </main>
 
       {taskId !== null && <TaskDetail key={taskId} taskId={taskId} />}
+
+      {creatingBoard && (
+        <NameDialog
+          title="Yeni pano"
+          placeholder="örn. Günlük işler"
+          submitLabel="Oluştur"
+          onSubmit={async (name) => {
+            const board = await createBoard.mutateAsync(name)
+            navigate(`/boards/${board.id}`)
+          }}
+          onClose={() => setCreatingBoard(false)}
+        />
+      )}
 
       {creating && (
         <ProjectDialog

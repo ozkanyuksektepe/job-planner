@@ -192,3 +192,9 @@ export function Segmented<T extends string | number>({ options, value, onChange 
     </div>
   )
 }
+
+/** Page content container; board-style pages need more room than lists. */
+export function Page({ width = 'narrow', children }: { width?: 'narrow' | 'wide' | 'full'; children: ReactNode }) {
+  const max = { narrow: 'max-w-3xl', wide: 'max-w-6xl', full: 'max-w-none' }[width]
+  return <div className={`mx-auto px-10 pb-16 pt-12 ${max}`}>{children}</div>
+}

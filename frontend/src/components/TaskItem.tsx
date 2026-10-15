@@ -1,5 +1,6 @@
-import { Calendar, Check, CornerDownRight, Flag, ListChecks, Loader, SignalHigh, SignalLow, SignalMedium, Sun } from 'lucide-react'
-import type { Task } from '../lib/api'
+import { Calendar, Check, CornerDownRight, Flag, Hash, ListChecks, Loader, SignalHigh, SignalLow, SignalMedium, Sun } from 'lucide-react'
+import { createContext, useContext, type ReactNode } from 'react'
+import type { Task, TagRef } from '../lib/api'
 import { formatRelative, todayISO } from '../lib/dates'
 import { useUpdateTask } from '../lib/hooks'
 import { useTaskPanel } from '../lib/useTaskPanel'
@@ -24,8 +25,56 @@ export function PriorityBadge({ priority }: { priority: number }) {
   )
 }
 
+export function TagChip({ tag, children }: { tag: TagRef; children?: ReactNode }) {
+  return (
+    <Chip icon={<Hash className="size-3" strokeWidth={2.5} style={{ color: tag.color }} />}>
+      {tag.name}
+      {children}
+    </Chip>
+  )
+}
+
+/** Metadata chips shared by list rows and board cards. */
+export function taskMetaChips(task: Task, { showProject = true, showSchedule = true, showStatus = true } = {}): ReactNode[] {
+  const today = todayISO()
+  const done = task.status === 'done'
+  const overdue = !done && task.due_date !== null && task.due_date < today
+  return [
+    showStatus && task.status === 'doing' && (
+      <Chip key="doing" tone="warning" icon={<Loader className="size-3" />}>Devam ediyor</Chip>
+    ),
+    task.parent_title && (
+      <Chip key="parent" icon={<CornerDownRight className="size-3" />}>{task.parent_title}</Chip>
+    ),
+    showSchedule && task.scheduled_date && task.scheduled_date !== today && (
+      <Chip key="sched" icon={<Calendar className="size-3" />}>{formatRelative(task.scheduled_date)}</Chip>
+    ),
+    task.due_date && (
+      <Chip key="due" tone={overdue ? 'danger' : 'default'} icon={<Flag className="size-3" />}>
+        {formatRelative(task.due_date)}
+      </Chip>
+    ),
+    task.subtask_count > 0 && (
+      <Chip key="sub" tone={task.subtask_done === task.subtask_count ? 'accent' : 'default'} icon={<ListChecks className="size-3" />}>
+        {task.subtask_done}/{task.subtask_count}
+      </Chip>
+    ),
+    showProject && task.project_name && (
+      <Chip key="proj" icon={<ColorDot color={task.project_color} className="size-1.5" />}>{task.project_name}</Chip>
+    ),
+    ...task.tags.map((tag) => <TagChip key={`tag-${tag.id}`} tag={tag} />),
+  ].filter(Boolean)
+}
+
+/**
+ * Lets a page take over what checking a task does (e.g. a board also files it under "Tamamlananlar").
+ * Without a provider the checkbox just toggles the status.
+ */
+export const TaskCompleteContext = createContext<((task: Task, done: boolean) => void) | null>(null)
+
 export function TaskCheckbox({ task, size = 'md' }: { task: Task; size?: 'sm' | 'md' }) {
   const update = useUpdateTask()
+  const onComplete = useContext(TaskCompleteContext)
   const done = task.status === 'done'
   const dim = size === 'sm' ? 'size-4' : 'size-[18px]'
   return (
@@ -33,8 +82,10 @@ export function TaskCheckbox({ task, size = 'md' }: { task: Task; size?: 'sm' | 
       type="button"
       onClick={(e) => {
         e.stopPropagation()
-        update.mutate({ id: task.id, patch: { status: done ? 'todo' : 'done' } })
+        if (onComplete) onComplete(task, !done)
+        else update.mutate({ id: task.id, patch: { status: done ? 'todo' : 'done' } })
       }}
+      onPointerDown={(e) => e.stopPropagation()}
       className={`group/check flex ${dim} shrink-0 items-center justify-center rounded-full border-[1.5px] transition-all ${
         done ? 'animate-check border-accent bg-accent text-white' : 'border-zinc-300 hover:border-fg-faint dark:border-zinc-600'
       }`}
@@ -53,34 +104,9 @@ export default function TaskItem({ task, showProject = true }: { task: Task; sho
   const update = useUpdateTask()
   const today = todayISO()
   const done = task.status === 'done'
-  const overdue = !done && task.due_date !== null && task.due_date < today
   const scheduledToday = task.scheduled_date === today
   const selected = taskId === task.id
-
-  const meta = [
-    task.status === 'doing' && (
-      <Chip key="doing" tone="warning" icon={<Loader className="size-3" />}>Devam ediyor</Chip>
-    ),
-    task.parent_title && (
-      <Chip key="parent" icon={<CornerDownRight className="size-3" />}>{task.parent_title}</Chip>
-    ),
-    task.scheduled_date && !scheduledToday && (
-      <Chip key="sched" icon={<Calendar className="size-3" />}>{formatRelative(task.scheduled_date)}</Chip>
-    ),
-    task.due_date && (
-      <Chip key="due" tone={overdue ? 'danger' : 'default'} icon={<Flag className="size-3" />}>
-        {formatRelative(task.due_date)}
-      </Chip>
-    ),
-    task.subtask_count > 0 && (
-      <Chip key="sub" tone={task.subtask_done === task.subtask_count ? 'accent' : 'default'} icon={<ListChecks className="size-3" />}>
-        {task.subtask_done}/{task.subtask_count}
-      </Chip>
-    ),
-    showProject && task.project_name && (
-      <Chip key="proj" icon={<ColorDot color={task.project_color} className="size-1.5" />}>{task.project_name}</Chip>
-    ),
-  ].filter(Boolean)
+  const meta = taskMetaChips(task, { showProject })
 
   return (
     <div

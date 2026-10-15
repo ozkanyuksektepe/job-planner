@@ -11,6 +11,19 @@ export function parseISODate(iso: string): Date {
   return new Date(y, m - 1, d)
 }
 
+/** Local calendar day of an API timestamp (UTC ISO 8601). */
+export function localDateOf(ts: string): string {
+  return toISODate(new Date(ts))
+}
+
+/**
+ * The day a task belongs to in the week view: scheduled date, else due date, else the day it was created.
+ * Mirrors taskDaySQL in the backend.
+ */
+export function taskDay(t: { scheduled_date: string | null; due_date: string | null; created_at: string }): string {
+  return t.scheduled_date ?? t.due_date ?? localDateOf(t.created_at)
+}
+
 export function todayISO(): string {
   return toISODate(new Date())
 }
