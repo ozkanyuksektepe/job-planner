@@ -95,6 +95,8 @@ export interface BoardColumn {
   board_id: number
   name: string
   position: number
+  /** background colour "#rrggbb"; null = default look */
+  color: string | null
 }
 
 /** A task's place on a board; column_id null = on the board but in no user column. */
@@ -243,8 +245,9 @@ export const api = {
     create: (projectId: number, name: string) => request<Board>('POST', '/boards', { name, project_id: projectId }),
     rename: (id: number, name: string) => request<Board>('PATCH', `/boards/${id}`, { name }),
     remove: (id: number) => request<void>('DELETE', `/boards/${id}`),
-    createColumn: (id: number, name: string) => request<BoardColumn>('POST', `/boards/${id}/columns`, { name }),
-    updateColumn: (id: number, columnId: number, patch: Partial<Pick<BoardColumn, 'name' | 'position'>>) =>
+    createColumn: (id: number, name: string, color: string | null) =>
+      request<BoardColumn>('POST', `/boards/${id}/columns`, { name, color }),
+    updateColumn: (id: number, columnId: number, patch: Partial<Pick<BoardColumn, 'name' | 'position' | 'color'>>) =>
       request<BoardColumn>('PATCH', `/boards/${id}/columns/${columnId}`, patch),
     removeColumn: (id: number, columnId: number) => request<void>('DELETE', `/boards/${id}/columns/${columnId}`),
     place: (id: number, taskId: number, columnId: number | null, sortOrder?: number) =>

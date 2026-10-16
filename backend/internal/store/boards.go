@@ -2,7 +2,9 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +21,13 @@ type BoardColumn struct {
 	BoardID  int64   `json:"board_id"`
 	Name     string  `json:"name"`
 	Position float64 `json:"position"`
+	// Background colour "#rrggbb"; nil is the default look.
+	Color *string `json:"color"`
+}
+
+type ColumnInput struct {
+	Name  string  `json:"name"`
+	Color *string `json:"color"`
 }
 
 // BoardItem places a task on a board; ColumnID nil means it is in no user column.
@@ -35,7 +44,8 @@ type BoardView struct {
 	Items   []BoardItem   `json:"items"`
 	// The project's tasks placed on the board (any status).
 	Tasks []Task `json:"tasks"`
-	// The project's open top-level tasks that are not on this board yet.
+	// Open top-level tasks of the project that are not on this board yet, plus open top-level
+	// tasks without a project (the inbox), which join the project when placed in a column.
 	Unplaced []Task `json:"unplaced"`
 }
 
@@ -129,7 +139,7 @@ func (s *Store) GetBoard(id int64) (BoardView, error) {
 		return BoardView{}, err
 	}
 	if v.Unplaced, err = s.queryTasks(taskSelect+`
-		WHERE t.project_id = ? AND t.parent_id IS NULL AND t.status != 'done'
+		WHERE (t.project_id = ? OR t.project_id IS NULL) AND t.parent_id IS NULL AND t.status != 'done'
 		  AND t.id NOT IN (SELECT task_id FROM board_items WHERE board_id = ?)
 		ORDER BY t.sort_order, t.id`, b.ProjectID, id); err != nil {
 		return BoardView{}, err
@@ -138,7 +148,7 @@ func (s *Store) GetBoard(id int64) (BoardView, error) {
 }
 
 func (s *Store) boardColumns(boardID int64) ([]BoardColumn, error) {
-	rows, err := s.db.Query(`SELECT id, board_id, name, position FROM board_columns WHERE board_id = ? ORDER BY position, id`, boardID)
+	rows, err := s.db.Query(`SELECT id, board_id, name, position, color FROM board_columns WHERE board_id = ? ORDER BY position, id`, boardID)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +156,7 @@ func (s *Store) boardColumns(boardID int64) ([]BoardColumn, error) {
 	out := []BoardColumn{}
 	for rows.Next() {
 		var c BoardColumn
-		if err := rows.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position); err != nil {
+		if err := rows.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -199,15 +209,21 @@ func (s *Store) DeleteBoard(id int64) error {
 	return affectedOrNotFound(s.db.Exec(`DELETE FROM boards WHERE id = ?`, id))
 }
 
-func (s *Store) CreateBoardColumn(boardID int64, in NameInput) (BoardColumn, error) {
+func (s *Store) CreateBoardColumn(boardID int64, in ColumnInput) (BoardColumn, error) {
 	name, err := requiredName(in.Name)
 	if err != nil {
 		return BoardColumn{}, err
 	}
+	var color any
+	if in.Color != nil {
+		if color, err = checkColor("color", *in.Color); err != nil {
+			return BoardColumn{}, err
+		}
+	}
 	res, err := s.db.Exec(`
-		INSERT INTO board_columns (board_id, name, position)
-		VALUES (?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM board_columns WHERE board_id = ?))`,
-		boardID, name, boardID)
+		INSERT INTO board_columns (board_id, name, color, position)
+		VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM board_columns WHERE board_id = ?))`,
+		boardID, name, color, boardID)
 	if err != nil {
 		return BoardColumn{}, err
 	}
@@ -217,8 +233,8 @@ func (s *Store) CreateBoardColumn(boardID int64, in NameInput) (BoardColumn, err
 
 func (s *Store) getBoardColumn(boardID, id int64) (BoardColumn, error) {
 	var c BoardColumn
-	err := s.db.QueryRow(`SELECT id, board_id, name, position FROM board_columns WHERE id = ? AND board_id = ?`, id, boardID).
-		Scan(&c.ID, &c.BoardID, &c.Name, &c.Position)
+	err := s.db.QueryRow(`SELECT id, board_id, name, position, color FROM board_columns WHERE id = ? AND board_id = ?`, id, boardID).
+		Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrNotFound
 	}
@@ -229,6 +245,7 @@ func (s *Store) UpdateBoardColumn(boardID, id int64, p Patch) (BoardColumn, erro
 	sets, args, _, err := buildSet(p, map[string]fieldKind{
 		"name":     kRequiredString,
 		"position": kFloat,
+		"color":    kColor,
 	})
 	if err != nil {
 		return BoardColumn{}, err
@@ -248,18 +265,32 @@ func (s *Store) DeleteBoardColumn(boardID, id int64) error {
 }
 
 // PlaceTask puts a task of the board's project on the board (or moves it) into a column at a sort position.
+// A top-level task without a project (from the inbox) joins the board's project first.
 func (s *Store) PlaceTask(boardID, taskID int64, in PlaceInput) (BoardItem, error) {
 	b, err := s.getBoard(boardID)
 	if err != nil {
 		return BoardItem{}, err
 	}
-	var projectID *int64
-	if err := s.db.QueryRow(`SELECT project_id FROM tasks WHERE id = ?`, taskID).Scan(&projectID); errors.Is(err, sql.ErrNoRows) {
+	var projectID, parentID *int64
+	if err := s.db.QueryRow(`SELECT project_id, parent_id FROM tasks WHERE id = ?`, taskID).Scan(&projectID, &parentID); errors.Is(err, sql.ErrNoRows) {
 		return BoardItem{}, ErrNotFound
 	} else if err != nil {
 		return BoardItem{}, err
 	}
-	if projectID == nil || *projectID != b.ProjectID {
+	switch {
+	case projectID == nil && parentID == nil:
+		// Validate the column before moving the task, so a bad request changes nothing.
+		if in.ColumnID != nil {
+			if _, err := s.getBoardColumn(boardID, *in.ColumnID); errors.Is(err, ErrNotFound) {
+				return BoardItem{}, invalid("column does not belong to this board")
+			} else if err != nil {
+				return BoardItem{}, err
+			}
+		}
+		if _, err := s.UpdateTask(taskID, Patch{"project_id": json.RawMessage(strconv.FormatInt(b.ProjectID, 10))}); err != nil {
+			return BoardItem{}, err
+		}
+	case projectID == nil || *projectID != b.ProjectID:
 		return BoardItem{}, invalid("task is not in this board's project")
 	}
 	if in.ColumnID != nil {

@@ -6,8 +6,8 @@ import VoiceRecordings from '../components/VoiceRecordings'
 import { Button, ErrorBox, Page, Spinner } from '../components/ui'
 import type { Note, NotePatch } from '../lib/api'
 import { formatTimestamp } from '../lib/dates'
-import { useDeleteNote, useNote, useProjects, useUpdateNote } from '../lib/hooks'
-import { confirmDialog } from '../components/ConfirmDialog'
+import { useNote, useProjects, useUpdateNote } from '../lib/hooks'
+import { deleteWithUndo } from '../lib/undo'
 
 const AUTOSAVE_DELAY = 700
 
@@ -84,15 +84,13 @@ const SAVE_LABELS: Record<SaveState, string> = {
 function NoteView({ note }: { note: Note }) {
   const { queue, flush, state } = useAutosave(note.id)
   const update = useUpdateNote()
-  const remove = useDeleteNote()
   const { data: projects = [] } = useProjects()
   const [title, setTitle] = useState(note.title)
   const navigate = useNavigate()
   const backTo = note.project_id ? `/projects/${note.project_id}/notes` : '/notes'
 
-  async function deleteNote() {
-    if (!(await confirmDialog({ title: 'Bu not silinsin mi?', message: 'Bu işlem geri alınamaz.' }))) return
-    await remove.mutateAsync(note.id)
+  function deleteNote() {
+    deleteWithUndo({ kind: 'note', id: note.id, endpoint: `/notes/${note.id}`, message: `"${note.title || 'Başlıksız not'}" silindi` })
     navigate(backTo)
   }
 

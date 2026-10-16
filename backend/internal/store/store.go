@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ const (
 	kNullableID                      // integer id or null
 	kFloat                           // number
 	kBool                            // stored as 0/1
+	kColor                           // "#rrggbb" or null
 )
 
 // buildSet turns a Patch into "col = ?" clauses for the allowed fields.
@@ -129,6 +131,15 @@ func decodeField(name string, kind fieldKind, raw json.RawMessage) (any, error) 
 			return nil, invalid("%s must be a number", name)
 		}
 		return f, nil
+	case kColor:
+		if isNull {
+			return nil, nil
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, invalid("%s must be a colour string or null", name)
+		}
+		return checkColor(name, s)
 	case kBool:
 		var b bool
 		if err := json.Unmarshal(raw, &b); err != nil {
@@ -172,4 +183,17 @@ func affectedOrNotFound(res sql.Result, err error) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// checkColor accepts "#rrggbb" (stored lower-case); "" means no colour.
+func checkColor(name, s string) (any, error) {
+	if s == "" {
+		return nil, nil
+	}
+	if !hexColor.MatchString(s) {
+		return nil, invalid("%s must look like #rrggbb", name)
+	}
+	return strings.ToLower(s), nil
 }

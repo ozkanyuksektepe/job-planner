@@ -7,8 +7,8 @@ import TaskList from '../components/TaskList'
 import { Button, EmptyState, ErrorBox, Page, PageHeader, PROJECT_COLORS, Spinner } from '../components/ui'
 import type { Tag } from '../lib/api'
 import { useTaskFilters } from '../lib/filters'
-import { useDeleteTag, useTag, useTasks, useUpdateTag } from '../lib/hooks'
-import { confirmDialog } from '../components/ConfirmDialog'
+import { useTag, useTasks, useUpdateTag } from '../lib/hooks'
+import { deleteWithUndo } from '../lib/undo'
 
 export default function TagPage() {
   const id = Number(useParams().tagId)
@@ -16,20 +16,14 @@ export default function TagPage() {
   const tasks = useTasks({ tag_id: id })
   const filter = useTaskFilters(['tag'])
   const visible = filter.apply(tasks.data ?? [])
-  const remove = useDeleteTag()
   const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
 
   if (isLoading) return <Page><Spinner /></Page>
   if (error || !tag) return <Page><ErrorBox error={error ?? 'Etiket bulunamadı'} /></Page>
 
-  async function deleteTag() {
-    const ok = await confirmDialog({
-      title: `"${tag!.name}" etiketi silinsin mi?`,
-      message: 'Görevler silinmez, sadece bu etiket kaldırılır.',
-    })
-    if (!ok) return
-    await remove.mutateAsync(id)
+  function deleteTag() {
+    deleteWithUndo({ kind: 'tag', id, endpoint: `/tags/${id}`, message: `"${tag!.name}" etiketi silindi` })
     navigate('/today')
   }
 

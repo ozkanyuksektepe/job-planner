@@ -1,6 +1,6 @@
 import {
   closestCenter, closestCorners, defaultDropAnimationSideEffects, DndContext, DragOverlay, KeyboardSensor, PointerSensor,
-  useDroppable, useSensor, useSensors, type CollisionDetection, type DropAnimation, type DragEndEvent, type DragOverEvent, type DragStartEvent, type UniqueIdentifier,
+  pointerWithin, useDroppable, useSensor, useSensors, type CollisionDetection, type DropAnimation, type DragEndEvent, type DragOverEvent, type DragStartEvent, type UniqueIdentifier,
 } from '@dnd-kit/core'
 import {
   arrayMove, horizontalListSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
@@ -11,7 +11,8 @@ import type { Task, TaskInput } from '../lib/api'
 import { useTaskPanel } from '../lib/useTaskPanel'
 import QuickAdd from './QuickAdd'
 import { PriorityBadge, TaskCheckbox, taskMetaChips } from './TaskItem'
-import { CountPill } from './ui'
+import { columnBorder, columnTint } from './ColumnDialog'
+import { ColorDot, CountPill } from './ui'
 
 export interface BoardColumn {
   id: string
@@ -33,6 +34,8 @@ export interface BoardColumn {
   actions?: ReactNode
   /** the column can be dragged by its header to another place among the movable columns */
   movable?: boolean
+  /** background colour "#rrggbb" (a light tint of it); null/undefined = default look */
+  color?: string | null
 }
 
 export interface ColumnMove {
@@ -47,11 +50,26 @@ const COLUMN_PREFIX = 'column:'
 const columnDragId = (id: string) => COLUMN_PREFIX + id
 const isColumnDrag = (id: UniqueIdentifier) => typeof id === 'string' && id.startsWith(COLUMN_PREFIX)
 
-/** A column drag only looks at columns, a card drag only at cards and column drop areas. */
+/**
+ * A column drag only looks at columns, a card drag only at cards and columns. A card lands only in
+ * the column under the pointer: dropped outside every column it goes back (closest-corner alone would
+ * pick the nearest column, e.g. "Tamamlananlar", and complete the task).
+ */
 const collisionDetection: CollisionDetection = (args) => {
   const columnDrag = isColumnDrag(args.active.id)
   const droppableContainers = args.droppableContainers.filter((c) => isColumnDrag(c.id) === columnDrag)
-  return (columnDrag ? closestCenter : closestCorners)({ ...args, droppableContainers })
+  if (columnDrag) return closestCenter({ ...args, droppableContainers })
+  // Keyboard drags have no pointer; they move between neighbours as before.
+  if (!args.pointerCoordinates) return closestCorners({ ...args, droppableContainers })
+
+  // Columns have string ids, cards numeric task ids.
+  const column = pointerWithin({ ...args, droppableContainers }).find((c) => typeof c.id === 'string')
+  if (!column) return []
+  // Sort among that column's own cards.
+  const inColumn = droppableContainers.filter(
+    (c) => c.id === column.id || c.data.current?.sortable?.containerId === column.id,
+  )
+  return closestCorners({ ...args, droppableContainers: inColumn })
 }
 
 // dnd-kit hides the dragged element while the overlay animates into place. That suits cards, but a
@@ -125,10 +143,17 @@ export default function Board({ columns, onMove, onMoveColumn, columnClassName =
   const [columnOrder, setColumnOrder] = useState(serverColumnOrder)
   useEffect(() => setColumnOrder(serverColumnOrder), [serverColumnOrder])
   const orderedColumns = useMemo(() => {
-    const byId = new Map(columns.map((c) => [c.id, c]))
+    // Movable columns sorted by the local order; ones it doesn't know yet (just added or restored)
+    // keep their server position after them. Each column appears exactly once.
+    const rank = new Map(columnOrder.map((id, i) => [id, i]))
+    const movable = columns.filter((c) => c.movable)
+    const sorted = movable
+      .map((c, i) => ({ c, r: rank.get(c.id) ?? columnOrder.length + i }))
+      .sort((a, b) => a.r - b.r)
+      .map((x) => x.c)
     let next = 0
-    // Fixed columns keep their place; movable ones fill their slots in local order.
-    return columns.map((c) => (c.movable ? (byId.get(columnOrder[next++]) ?? c) : c))
+    // Fixed columns keep their place; movable ones fill the movable slots.
+    return columns.map((c) => (c.movable ? sorted[next++] : c))
   }, [columns, columnOrder])
 
   const sensors = useSensors(
@@ -265,6 +290,8 @@ interface CardDisplay {
   showStatus?: boolean
   /** the board being shown, so cards don't repeat it in their board chips */
   boardId?: number
+  /** label tasks without a project ("Gelen Kutusu") on a project's board */
+  markInbox?: boolean
 }
 
 const PAGE_SIZE = 25
@@ -351,9 +378,19 @@ function Column({ column, ids, limit, onShowMore, maxHeight, taskById, className
 
   return (
     <div
-      ref={sortable.setNodeRef}
+      ref={(el) => {
+        sortable.setNodeRef(el)
+        // The whole column (header and add field too) accepts dropped cards.
+        setNodeRef(el)
+      }}
       data-column={column.id}
-      style={{ maxHeight, transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }}
+      style={{
+        maxHeight,
+        transform: CSS.Translate.toString(sortable.transform),
+        transition: sortable.transition,
+        // Inline so any colour works; the border keeps the accent while the column is lifted.
+        ...(column.color ? { backgroundColor: columnTint(column.color), ...(lifted ? {} : { borderColor: columnBorder(column.color) }) } : {}),
+      }}
       className={`group/col flex shrink-0 flex-col rounded-2xl border transition-colors ${className} ${
         lifted
           ? 'border-accent/60 bg-surface-2'
@@ -383,6 +420,7 @@ function Column({ column, ids, limit, onShowMore, maxHeight, taskById, className
         <div className="min-w-0">
           <div className={`flex items-center gap-2 text-[13px] font-semibold ${column.highlight ? 'text-accent-fg' : 'text-fg'}`}>
             {column.icon}
+            {column.color && <ColorDot color={column.color} className="size-2" />}
             <span className="truncate">{column.title}</span>
           </div>
           {column.subtitle && <div className="mt-0.5 text-[11px] text-fg-faint">{column.subtitle}</div>}
@@ -397,10 +435,7 @@ function Column({ column, ids, limit, onShowMore, maxHeight, taskById, className
 
       <SortableContext id={column.id} items={visibleIds} strategy={verticalListSortingStrategy}>
         <div
-          ref={(el) => {
-            setNodeRef(el)
-            listRef.current = el
-          }}
+          ref={listRef}
           className={`m-1.5 flex min-h-28 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain rounded-xl p-1 transition-colors ${
             isOver ? 'bg-accent/8' : ''
           }`}
@@ -445,14 +480,14 @@ function SortableCard({ task, display }: { task: Task; display: CardDisplay }) {
   )
 }
 
-export function TaskCard({ task, overlay = false, showProject = true, showSchedule = true, showStatus = true, boardId }: {
+export function TaskCard({ task, overlay = false, showProject = true, showSchedule = true, showStatus = true, boardId, markInbox }: {
   task: Task
   overlay?: boolean
 } & CardDisplay) {
   const { open, taskId } = useTaskPanel()
   const done = task.status === 'done'
   const selected = taskId === task.id
-  const meta = taskMetaChips(task, { showProject, showSchedule, showStatus, boardId })
+  const meta = taskMetaChips(task, { showProject, showSchedule, showStatus, boardId, markInbox })
   const showFooter = meta.length > 0 || (!done && task.priority > 0)
 
   return (

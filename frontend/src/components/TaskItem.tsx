@@ -1,5 +1,5 @@
 import {
-  AlignLeft, Calendar, Check, ChevronRight, Columns3, CornerDownRight, Flag, Hash, ImageIcon, ListChecks, Loader, Mic, SignalHigh, SignalLow, SignalMedium, Sun,
+  AlignLeft, Calendar, Check, ChevronRight, Columns3, CornerDownRight, Inbox, Flag, Hash, ImageIcon, ListChecks, Loader, Mic, SignalHigh, SignalLow, SignalMedium, Sun,
 } from 'lucide-react'
 import { createContext, useContext, type ReactNode } from 'react'
 import type { Task, TagRef } from '../lib/api'
@@ -39,12 +39,14 @@ export function TagChip({ tag, children }: { tag: TagRef; children?: ReactNode }
 /** Metadata chips shared by list rows and board cards. */
 export function taskMetaChips(
   task: Task,
-  { showProject = true, showSchedule = true, showStatus = true, boardId }: {
+  { showProject = true, showSchedule = true, showStatus = true, boardId, markInbox = false }: {
     showProject?: boolean
     showSchedule?: boolean
     showStatus?: boolean
     /** the board the task is shown on; its own chip would be redundant there */
     boardId?: number
+    /** label tasks without a project (shown on a project's board, they come from the inbox) */
+    markInbox?: boolean
   } = {},
 ): ReactNode[] {
   const today = todayISO()
@@ -78,6 +80,9 @@ export function taskMetaChips(
     ),
     task.audio_count > 0 && (
       <Chip key="audio" icon={<Mic className="size-3" />}>{task.audio_count}</Chip>
+    ),
+    markInbox && task.project_id === null && task.parent_id === null && (
+      <Chip key="inbox" tone="info" icon={<Inbox className="size-3" />}>Gelen Kutusu</Chip>
     ),
     showProject && task.project_name && (
       <Chip key="proj" icon={<ColorDot color={task.project_color} className="size-1.5" />}>{task.project_name}</Chip>

@@ -9,6 +9,7 @@ import ProjectDialog from './ProjectDialog'
 import TaskDetail from './TaskDetail'
 import { ColorDot } from './ui'
 import { ConfirmHost } from './ConfirmDialog'
+import Toaster from './Toaster'
 
 function NavItem({ to, icon, badge, children, end }: {
   to: string
@@ -171,6 +172,7 @@ export default function Layout() {
 
       {taskId !== null && <TaskDetail key={taskId} taskId={taskId} />}
       <ConfirmHost />
+      <Toaster />
 
 
       {creating && (

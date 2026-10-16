@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"strings"
 )
 
@@ -79,13 +81,30 @@ func (s *Store) CreateProject(in ProjectInput) (Project, error) {
 	if in.Color == "" {
 		in.Color = "#6366f1"
 	}
-	res, err := s.db.Exec(`INSERT INTO projects (name, description, color) VALUES (?, ?, ?)`,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Project{}, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`INSERT INTO projects (name, description, color) VALUES (?, ?, ?)`,
 		in.Name, in.Description, in.Color)
 	if err != nil {
 		return Project{}, err
 	}
 	id, _ := res.LastInsertId()
+	// Every new project starts with a board, named after it plus a short number ("test-4821").
+	if _, err := tx.Exec(`INSERT INTO boards (project_id, name) VALUES (?, ?)`, id, defaultBoardName(in.Name)); err != nil {
+		return Project{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Project{}, err
+	}
 	return s.GetProject(id)
+}
+
+func defaultBoardName(project string) string {
+	return fmt.Sprintf("%s-%d", project, 1000+rand.IntN(9000))
 }
 
 func (s *Store) UpdateProject(id int64, p Patch) (Project, error) {

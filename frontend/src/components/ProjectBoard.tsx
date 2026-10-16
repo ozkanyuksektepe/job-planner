@@ -2,17 +2,18 @@ import { CalendarClock, CheckCircle2, Columns3, Pencil, Plus, Trash2 } from 'luc
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Board, { sortOrderBetween, type BoardColumn, type BoardMove, type ColumnMove } from './Board'
-import { confirmDialog } from './ConfirmDialog'
 import FilterBar from './FilterBar'
+import ColumnDialog from './ColumnDialog'
 import NameDialog from './NameDialog'
 import { TaskCompleteContext } from './TaskItem'
-import { Button, EmptyState, ErrorBox, Spinner } from './ui'
+import { Button, ErrorBox, Spinner } from './ui'
 import type { BoardColumn as Column, Task } from '../lib/api'
 import { useTaskFilters } from '../lib/filters'
 import {
-  useBoard, useCreateBoardColumn, useDeleteBoard, useDeleteBoardColumn, useMoveBoardColumn, usePlaceTask, useRenameBoard, useRenameBoardColumn,
+  useBoard, useCreateBoardColumn, useMoveBoardColumn, usePlaceTask, useRenameBoard, useUpdateBoardColumn,
   useUnplaceTask, useUpdateTask,
 } from '../lib/hooks'
+import { deleteWithUndo } from '../lib/undo'
 
 // Fixed column ids; user columns are "col-<id>".
 const UNPLACED = 'unplaced'
@@ -20,7 +21,7 @@ const DONE = 'done'
 const columnKey = (id: number) => `col-${id}`
 const columnIdOf = (key: string) => Number(key.slice('col-'.length))
 
-type Dialog = { kind: 'renameBoard' } | { kind: 'addColumn' } | { kind: 'renameColumn'; column: Column } | null
+type Dialog = { kind: 'renameBoard' } | { kind: 'addColumn' } | { kind: 'editColumn'; column: Column } | null
 
 /** A project's board: user columns ("alanlar") plus "Planlanmamış" and "Tamamlananlar". */
 export default function ProjectBoard({ projectId, boardId }: { projectId: number; boardId: number }) {
@@ -37,12 +38,10 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
   const { mutate: updateTask } = useUpdateTask()
   const { mutate: placeTask } = usePlaceTask()
   const { mutate: unplaceTask } = useUnplaceTask()
-  const { mutate: deleteColumn } = useDeleteBoardColumn()
   const { mutate: moveColumn } = useMoveBoardColumn()
   const renameBoard = useRenameBoard()
-  const deleteBoard = useDeleteBoard()
   const addColumn = useCreateBoardColumn()
-  const renameColumn = useRenameBoardColumn()
+  const updateColumn = useUpdateBoardColumn()
 
   const itemByTask = useMemo(() => new Map((board?.items ?? []).map((i) => [i.task_id, i])), [board])
 
@@ -51,7 +50,8 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
   const onComplete = useCallback(
     (task: Task, done: boolean) => {
       updateTask({ id: task.id, patch: { status: done ? 'done' : 'todo' } })
-      if (done && !itemByTask.has(task.id)) placeTask({ boardId, taskId: task.id, columnId: null })
+      // An inbox task (no project) is only completed; placing it would move it into this project.
+      if (done && !itemByTask.has(task.id) && task.project_id !== null) placeTask({ boardId, taskId: task.id, columnId: null })
     },
     [updateTask, placeTask, itemByTask, boardId],
   )
@@ -81,6 +81,7 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
       ...board.columns.map((c) => ({
         id: columnKey(c.id),
         movable: true,
+        color: c.color,
         title: c.name,
         tasks: inColumn(c.id),
         quickAdd: defaults,
@@ -89,21 +90,22 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
           <>
             <button
               type="button"
-              onClick={() => setDialog({ kind: 'renameColumn', column: c })}
+              onClick={() => setDialog({ kind: 'editColumn', column: c })}
               className="flex size-6 items-center justify-center rounded-md text-fg-faint hover:bg-hover hover:text-fg"
-              title="Alanı yeniden adlandır"
+              title="Alanı düzenle"
             >
               <Pencil className="size-3.5" />
             </button>
             <button
               type="button"
-              onClick={async () => {
-                const ok = await confirmDialog({
-                  title: `"${c.name}" alanı silinsin mi?`,
-                  message: "İçindeki görevler silinmez, Planlanmamış'a döner.",
+              onClick={() =>
+                deleteWithUndo({
+                  kind: 'column',
+                  id: c.id,
+                  endpoint: `/boards/${boardId}/columns/${c.id}`,
+                  message: `"${c.name}" alanı silindi`,
                 })
-                if (ok) deleteColumn({ boardId, columnId: c.id })
-              }}
+              }
               className="flex size-6 items-center justify-center rounded-md text-fg-faint hover:bg-rose-500/10 hover:text-rose-500"
               title="Alanı sil"
             >
@@ -121,7 +123,7 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
         countAll: true,
       },
     ]
-  }, [board, itemByTask, boardId, placeTask, deleteColumn, apply, defaults])
+  }, [board, itemByTask, boardId, placeTask, apply, defaults])
 
   function onMove({ task, columnId, before, after, changedColumn }: BoardMove) {
     const item = itemByTask.get(task.id)
@@ -157,14 +159,9 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
     moveColumn({ boardId, columnId: columnIdOf(columnId), position })
   }
 
-  async function removeBoard() {
+  function removeBoard() {
     if (!board) return
-    const ok = await confirmDialog({
-      title: `"${board.name}" panosu silinsin mi?`,
-      message: 'Görevler silinmez, sadece bu pano kaldırılır.',
-    })
-    if (!ok) return
-    await deleteBoard.mutateAsync(boardId)
+    deleteWithUndo({ kind: 'board', id: boardId, endpoint: `/boards/${boardId}`, message: `"${board.name}" panosu silindi` })
     navigate(`/projects/${projectId}`)
   }
 
@@ -194,12 +191,15 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
       </div>
 
       {board.columns.length === 0 && (
-        <div className="mb-6 rounded-2xl border border-dashed border-line">
-          <EmptyState
-            icon={<Columns3 className="size-6" />}
-            title="Henüz alan yok"
-            hint="“Alan ekle” ile Yapılacaklar, Önemli gibi alanlar oluştur; sonra görevleri sürükleyip bırak."
-          />
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-dashed border-line px-3.5 py-2.5">
+          <Columns3 className="size-4 shrink-0 text-fg-faint" />
+          <p className="min-w-0 flex-1 text-[13px] text-fg-muted">
+            <span className="font-medium text-fg">Henüz alan yok.</span> Yapılacaklar, Önemli gibi alanlar oluştur; sonra görevleri
+            sürükleyip bırak.
+          </p>
+          <Button size="sm" onClick={() => setDialog({ kind: 'addColumn' })}>
+            <Plus className="size-3.5" /> Alan ekle
+          </Button>
         </div>
       )}
 
@@ -210,7 +210,7 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
       />
 
       <TaskCompleteContext.Provider value={onComplete}>
-        <Board columns={columns} onMove={onMove} onMoveColumn={onMoveColumn} showProject={false} boardId={boardId} columnClassName="w-64" />
+        <Board columns={columns} onMove={onMove} onMoveColumn={onMoveColumn} showProject={false} markInbox boardId={boardId} columnClassName="w-64" />
       </TaskCompleteContext.Provider>
 
       {dialog?.kind === 'renameBoard' && (
@@ -222,19 +222,19 @@ export default function ProjectBoard({ projectId, boardId }: { projectId: number
         />
       )}
       {dialog?.kind === 'addColumn' && (
-        <NameDialog
+        <ColumnDialog
           title="Yeni alan"
-          placeholder="örn. Yapılacaklar, Önemli"
           submitLabel="Ekle"
-          onSubmit={(name) => addColumn.mutateAsync({ boardId, name })}
+          onSubmit={({ name, color }) => addColumn.mutateAsync({ boardId, name, color })}
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog?.kind === 'renameColumn' && (
-        <NameDialog
-          title="Alanı yeniden adlandır"
-          initial={dialog.column.name}
-          onSubmit={(name) => renameColumn.mutateAsync({ boardId, columnId: dialog.column.id, name })}
+      {dialog?.kind === 'editColumn' && (
+        <ColumnDialog
+          title="Alanı düzenle"
+          initialName={dialog.column.name}
+          initialColor={dialog.column.color}
+          onSubmit={({ name, color }) => updateColumn.mutateAsync({ boardId, columnId: dialog.column.id, name, color })}
           onClose={() => setDialog(null)}
         />
       )}

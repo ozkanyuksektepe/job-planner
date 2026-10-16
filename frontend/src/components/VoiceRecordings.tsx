@@ -1,16 +1,15 @@
 import type { AttachmentOwner } from '../lib/api'
-import { useAttachments, useDeleteAttachment, useUploadAttachments } from '../lib/hooks'
+import { useAttachments, useUploadAttachments } from '../lib/hooks'
 import AudioPlayer from './AudioPlayer'
 import { CountPill, ErrorBox } from './ui'
 import VoiceRecorder from './VoiceRecorder'
-import { confirmDialog } from './ConfirmDialog'
+import { deleteWithUndo } from '../lib/undo'
 
 /** "Ses kayıtları" section for a task or a note: the recordings' players plus the recorder. */
 export default function VoiceRecordings({ owner }: { owner: AttachmentOwner }) {
   const { data = [] } = useAttachments(owner)
   const recordings = data.filter((a) => a.kind === 'audio')
   const upload = useUploadAttachments()
-  const remove = useDeleteAttachment()
   const { mutate: save } = upload
 
   return (
@@ -24,7 +23,7 @@ export default function VoiceRecordings({ owner }: { owner: AttachmentOwner }) {
           <AudioPlayer
             key={a.id}
             attachment={a}
-            onDelete={async () => (await confirmDialog({ title: 'Bu ses kaydı silinsin mi?', message: 'Bu işlem geri alınamaz.' })) && remove.mutate({ id: a.id, owner })}
+            onDelete={() => deleteWithUndo({ kind: 'attachment', id: a.id, endpoint: `/attachments/${a.id}`, message: 'Ses kaydı silindi' })}
           />
         ))}
         <VoiceRecorder

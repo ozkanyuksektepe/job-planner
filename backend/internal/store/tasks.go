@@ -60,7 +60,7 @@ type TaskFilter struct {
 	ProjectID *int64
 	ParentID  *int64
 	TagID     *int64 // tasks (and subtasks) carrying this tag
-	Inbox     bool   // no project and no scheduled date
+	Inbox     bool   // no project (scheduled or not)
 	// Open top-level tasks whose day (see taskDaySQL) is before this date: the week view's "Bekleyenler".
 	BacklogBefore string
 }
@@ -147,7 +147,7 @@ func (s *Store) ListTasks(f TaskFilter) ([]Task, error) {
 		args = append(args, *f.TagID)
 	}
 	if f.Inbox {
-		where = append(where, "t.project_id IS NULL AND t.scheduled_date IS NULL")
+		where = append(where, "t.project_id IS NULL")
 	}
 	if f.BacklogBefore != "" {
 		if err := checkDate(f.BacklogBefore); err != nil {
@@ -195,7 +195,7 @@ func (s *Store) Today(date string) (TodayView, error) {
 	}
 	today, err := s.queryTasks(taskSelect+`
 		WHERE (t.due_date = ? OR `+taskDaySQL+` = ?)
-		ORDER BY t.status = 'done', t.priority DESC, t.sort_order, t.id`, date, date)
+		ORDER BY t.status = 'done', t.sort_order, t.id`, date, date) // manual order: the list is drag-sortable
 	if err != nil {
 		return TodayView{}, err
 	}

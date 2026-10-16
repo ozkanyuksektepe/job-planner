@@ -335,7 +335,7 @@ func (s *Server) deleteBoard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createBoardColumn(w http.ResponseWriter, r *http.Request) {
-	var in store.NameInput
+	var in store.ColumnInput
 	if id, ok := pathID(w, r); ok && decode(w, r, &in) {
 		respond(w, http.StatusCreated)(s.store.CreateBoardColumn(id, in))
 	}

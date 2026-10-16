@@ -1,12 +1,14 @@
-import { Archive, ArchiveRestore, Columns3, List, ListTodo, NotebookPen, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, CheckCircle2, Circle, Columns3, List, ListTodo, NotebookPen, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { NavLink, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, NavLink, useNavigate, useParams } from 'react-router-dom'
 import FilterBar from '../components/FilterBar'
 import NameDialog from '../components/NameDialog'
 import NoteGrid from '../components/NoteGrid'
 import ProjectBoard from '../components/ProjectBoard'
+import CollapsiblePanel from '../components/CollapsiblePanel'
 import ProjectDialog from '../components/ProjectDialog'
 import QuickAdd from '../components/QuickAdd'
+import TaskItem from '../components/TaskItem'
 import TaskList from '../components/TaskList'
 import { Button, Chip, ErrorBox, Page, Spinner } from '../components/ui'
 import type { Project } from '../lib/api'
@@ -14,19 +16,26 @@ import { useTaskFilters } from '../lib/filters'
 import { useCreateBoard, useCreateNote, useDeleteProject, useNotes, useProject, useProjectBoards, useTasks, useUpdateProject } from '../lib/hooks'
 import { confirmDialog } from '../components/ConfirmDialog'
 
-export default function ProjectPage({ tab }: { tab: 'tasks' | 'notes' }) {
+/**
+ * Tasks tab routes: /projects/:id opens the project's first board (the list when it has none),
+ * /projects/:id/list the list, /projects/:id/boards/:boardId a board.
+ */
+export default function ProjectPage({ tab, list = false }: { tab: 'tasks' | 'notes'; list?: boolean }) {
   const params = useParams()
   const id = Number(params.projectId)
-  // On /projects/:id/boards/:boardId the tasks tab shows that board instead of the list.
   const boardId = params.boardId ? Number(params.boardId) : null
   const { data: project, isLoading, error } = useProject(id)
+  const boards = useProjectBoards(id)
   const [editing, setEditing] = useState(false)
   const update = useUpdateProject()
   const remove = useDeleteProject()
   const navigate = useNavigate()
 
-  if (isLoading) return <Page><Spinner /></Page>
+  const pickDefaultView = tab === 'tasks' && boardId === null && !list
+  if (isLoading || (pickDefaultView && boards.isLoading)) return <Page><Spinner /></Page>
   if (error || !project) return <Page><ErrorBox error={error ?? 'Proje bulunamadı'} /></Page>
+  const firstBoard = boards.data?.[0]
+  if (pickDefaultView && firstBoard) return <Navigate to={`/projects/${id}/boards/${firstBoard.id}`} replace />
 
   const total = project.open_tasks + project.done_tasks
   const pct = total ? Math.round((project.done_tasks / total) * 100) : 0
@@ -45,7 +54,7 @@ export default function ProjectPage({ tab }: { tab: 'tasks' | 'notes' }) {
   const board = tab === 'tasks' && boardId !== null
 
   return (
-    <Page width={board ? 'full' : 'narrow'}>
+    <Page width={board ? 'full' : tab === 'tasks' ? 'wide' : 'narrow'}>
       <header className="mb-8">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div
@@ -141,7 +150,7 @@ function ViewSwitcher({ projectId, boardId }: { projectId: number; boardId: numb
   return (
     <>
       <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-lg bg-hover p-0.5">
-        <NavLink to={`/projects/${projectId}`} className={item(boardId === null)}>
+        <NavLink to={`/projects/${projectId}/list`} className={item(boardId === null)}>
           <List className="size-3.5" /> Liste
         </NavLink>
         {boards.map((b) => (
@@ -174,6 +183,11 @@ function ProjectTasks({ projectId }: { projectId: number }) {
   const { data, isLoading, error } = useTasks({ project_id: projectId })
   const filter = useTaskFilters(['project'])
   const tasks = filter.apply(data ?? [])
+  const open = tasks.filter((t) => t.status !== 'done')
+  // Most recently completed first.
+  const done = tasks
+    .filter((t) => t.status === 'done')
+    .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
   return (
     <>
       <QuickAdd defaults={{ ...filter.defaults, project_id: projectId }} placeholder="Projeye görev ekle…" />
@@ -181,7 +195,31 @@ function ProjectTasks({ projectId }: { projectId: number }) {
       {isLoading && <Spinner />}
       {error && <ErrorBox error={error} />}
       {data && (
-        <TaskList tasks={tasks} showProject={false} sortable emptyText={filter.active ? 'Filtreye uyan açık görev yok' : 'Açık görev yok'} />
+        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
+          <CollapsiblePanel storageKey="project.open" title="Açık görevler" icon={<Circle className="size-4 text-fg-faint" />} count={open.length}>
+            {/* Left room for the drag handle that appears beside each row. */}
+            <div className="mb-2 pl-4">
+              <TaskList tasks={open} showProject={false} sortable emptyText={filter.active ? 'Filtreye uyan açık görev yok' : 'Açık görev yok'} />
+            </div>
+          </CollapsiblePanel>
+          <CollapsiblePanel
+            storageKey="project.done"
+            title="Tamamlananlar"
+            icon={<CheckCircle2 className="size-4 text-emerald-500" />}
+            count={done.length}
+            tone="accent"
+          >
+            {done.length === 0 ? (
+              <p className="px-3 pb-3 text-sm text-fg-muted">{filter.active ? 'Filtreye uyan tamamlanan görev yok' : 'Henüz tamamlanan görev yok'}</p>
+            ) : (
+              <div className="mb-2 flex flex-col gap-px">
+                {done.map((t) => (
+                  <TaskItem key={t.id} task={t} showProject={false} />
+                ))}
+              </div>
+            )}
+          </CollapsiblePanel>
+        </div>
       )}
     </>
   )

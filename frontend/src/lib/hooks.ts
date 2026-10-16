@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback } from 'react'
 import {
-  api, type AttachmentOwner, type NoteInput, type NotePatch, type Project, type ProjectInput, type TagInput, type TaskInput, type TaskListParams, type TaskPatch,
+  api, type Attachment, type AttachmentOwner, type Board, type BoardView, type Note, type NoteInput, type NotePatch, type Project,
+  type ProjectInput, type Tag, type TagInput, type Task, type TaskInput, type TaskListParams, type TaskPatch, type TodayView,
 } from './api'
+import { usePendingDeletes, type PendingSets } from './undo'
 
 export const keys = {
   projects: ['projects'] as const,
@@ -21,6 +24,59 @@ export const keys = {
   noteList: (projectId?: number) => ['notes', 'list', projectId ?? 'all'] as const,
   note: (id: number) => ['notes', 'one', id] as const,
 }
+
+// --- items waiting to be deleted (lib/undo.ts) are hidden from every query ---
+
+const nothingPending = (p: PendingSets) => Object.values(p).every((set) => set.size === 0)
+
+/** Drops pending tasks (and subtasks of pending tasks) and references to pending tags, boards and areas. */
+function visibleTasks(tasks: Task[], p: PendingSets): Task[] {
+  if (nothingPending(p)) return tasks
+  return tasks
+    .filter((t) => !p.task.has(t.id) && !(t.parent_id !== null && p.task.has(t.parent_id)))
+    .map((t) => cleanTask(t, p))
+}
+
+function cleanTask(t: Task, p: PendingSets): Task {
+  if (p.tag.size === 0 && p.board.size === 0 && p.column.size === 0) return t
+  return {
+    ...t,
+    tags: t.tags.filter((g) => !p.tag.has(g.id)),
+    boards: t.boards
+      .filter((b) => !p.board.has(b.board_id))
+      .map((b) => (b.column_id !== null && p.column.has(b.column_id) ? { ...b, column_id: null, column_name: null } : b)),
+  }
+}
+
+function visibleBoard(v: BoardView, p: PendingSets): BoardView {
+  if (nothingPending(p)) return v
+  return {
+    ...v,
+    // A deleted area's tasks go back to "Planlanmamış", as the server will do.
+    columns: v.columns.filter((c) => !p.column.has(c.id)),
+    items: v.items
+      .filter((i) => !p.task.has(i.task_id))
+      .map((i) => (i.column_id !== null && p.column.has(i.column_id) ? { ...i, column_id: null } : i)),
+    tasks: visibleTasks(v.tasks, p),
+    unplaced: visibleTasks(v.unplaced, p),
+  }
+}
+
+/** A `select` for useQuery that re-runs when the set of pending deletes changes. */
+function usePendingFilter<T>(filter: (data: T, p: PendingSets) => T) {
+  const pending = usePendingDeletes()
+  return useCallback((data: T) => filter(data, pending), [filter, pending])
+}
+
+const visibleTaskList = (tasks: Task[], p: PendingSets) => visibleTasks(tasks, p)
+const visibleToday = (v: TodayView, p: PendingSets): TodayView =>
+  nothingPending(p) ? v : { ...v, overdue: visibleTasks(v.overdue, p), today: visibleTasks(v.today, p) }
+const visibleTask = (t: Task, p: PendingSets) => cleanTask(t, p)
+const visibleBoards = (boards: Board[], p: PendingSets) => (p.board.size ? boards.filter((b) => !p.board.has(b.id)) : boards)
+const visibleTags = (tags: Tag[], p: PendingSets) => (p.tag.size ? tags.filter((t) => !p.tag.has(t.id)) : tags)
+const visibleNotes = (notes: Note[], p: PendingSets) => (p.note.size ? notes.filter((n) => !p.note.has(n.id)) : notes)
+const visibleAttachments = (list: Attachment[], p: PendingSets) =>
+  p.attachment.size ? list.filter((a) => !p.attachment.has(a.id)) : list
 
 // --- projects ---
 
@@ -65,11 +121,13 @@ export function useDeleteProject() {
 // --- tasks ---
 
 export function useTasks(params: TaskListParams, enabled = true) {
-  return useQuery({ queryKey: keys.taskList(params), queryFn: () => api.tasks.list(params), enabled })
+  const select = usePendingFilter(visibleTaskList)
+  return useQuery({ queryKey: keys.taskList(params), queryFn: () => api.tasks.list(params), enabled, select })
 }
 
 export function useToday(date: string) {
-  return useQuery({ queryKey: keys.today(date), queryFn: () => api.tasks.today(date) })
+  const select = usePendingFilter(visibleToday)
+  return useQuery({ queryKey: keys.today(date), queryFn: () => api.tasks.today(date), select })
 }
 
 export function useTask(id: number | null) {
@@ -77,6 +135,7 @@ export function useTask(id: number | null) {
     queryKey: keys.task(id ?? 0),
     queryFn: () => api.tasks.get(id!),
     enabled: id !== null,
+    select: usePendingFilter(visibleTask),
   })
 }
 
@@ -104,15 +163,11 @@ export function useUpdateTask() {
   })
 }
 
-export function useDeleteTask() {
-  const invalidate = useInvalidateTasks()
-  return useMutation({ mutationFn: (id: number) => api.tasks.remove(id), onSuccess: invalidate })
-}
-
 // --- attachments ---
 
 export function useAttachments(owner: AttachmentOwner) {
-  return useQuery({ queryKey: keys.attachments(owner), queryFn: () => api.attachments.list(owner) })
+  const select = usePendingFilter(visibleAttachments)
+  return useQuery({ queryKey: keys.attachments(owner), queryFn: () => api.attachments.list(owner), select })
 }
 
 /** Attachment changes also change the photo / recording counts shown on tasks and notes. */
@@ -138,18 +193,12 @@ export function useUploadAttachments() {
   })
 }
 
-export function useDeleteAttachment() {
-  const invalidate = useInvalidateAttachments()
-  return useMutation({
-    mutationFn: ({ id }: { id: number; owner: AttachmentOwner }) => api.attachments.remove(id),
-    onSuccess: (_, { owner }) => invalidate(owner),
-  })
-}
 
 // --- tags ---
 
 export function useTags() {
-  return useQuery({ queryKey: keys.tags, queryFn: api.tags.list })
+  const select = usePendingFilter(visibleTags)
+  return useQuery({ queryKey: keys.tags, queryFn: api.tags.list, select })
 }
 
 export function useTag(id: number) {
@@ -176,25 +225,17 @@ export function useUpdateTag() {
   })
 }
 
-export function useDeleteTag() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: number) => api.tags.remove(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.tags })
-      qc.invalidateQueries({ queryKey: keys.tasks })
-    },
-  })
-}
 
 // --- boards ---
 
 export function useProjectBoards(projectId: number) {
-  return useQuery({ queryKey: keys.projectBoards(projectId), queryFn: () => api.boards.list(projectId) })
+  const select = usePendingFilter(visibleBoards)
+  return useQuery({ queryKey: keys.projectBoards(projectId), queryFn: () => api.boards.list(projectId), select })
 }
 
 export function useBoard(id: number) {
-  return useQuery({ queryKey: keys.board(id), queryFn: () => api.boards.get(id) })
+  const select = usePendingFilter(visibleBoard)
+  return useQuery({ queryKey: keys.board(id), queryFn: () => api.boards.get(id), select })
 }
 
 /**
@@ -208,6 +249,8 @@ function useBoardMutation<V, R>(fn: (vars: V) => Promise<R>) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.boards })
       qc.invalidateQueries({ queryKey: keys.tasks })
+      // Placing an inbox task on a board moves it into the project (counts change).
+      qc.invalidateQueries({ queryKey: keys.projects })
     },
   })
 }
@@ -215,19 +258,18 @@ function useBoardMutation<V, R>(fn: (vars: V) => Promise<R>) {
 export const useCreateBoard = () =>
   useBoardMutation(({ projectId, name }: { projectId: number; name: string }) => api.boards.create(projectId, name))
 export const useRenameBoard = () => useBoardMutation(({ id, name }: { id: number; name: string }) => api.boards.rename(id, name))
-export const useDeleteBoard = () => useBoardMutation((id: number) => api.boards.remove(id))
 export const useCreateBoardColumn = () =>
-  useBoardMutation(({ boardId, name }: { boardId: number; name: string }) => api.boards.createColumn(boardId, name))
-export const useRenameBoardColumn = () =>
-  useBoardMutation(({ boardId, columnId, name }: { boardId: number; columnId: number; name: string }) =>
-    api.boards.updateColumn(boardId, columnId, { name }),
+  useBoardMutation(({ boardId, name, color }: { boardId: number; name: string; color: string | null }) =>
+    api.boards.createColumn(boardId, name, color),
+  )
+export const useUpdateBoardColumn = () =>
+  useBoardMutation(({ boardId, columnId, name, color }: { boardId: number; columnId: number; name: string; color: string | null }) =>
+    api.boards.updateColumn(boardId, columnId, { name, color }),
   )
 export const useMoveBoardColumn = () =>
   useBoardMutation(({ boardId, columnId, position }: { boardId: number; columnId: number; position: number }) =>
     api.boards.updateColumn(boardId, columnId, { position }),
   )
-export const useDeleteBoardColumn = () =>
-  useBoardMutation(({ boardId, columnId }: { boardId: number; columnId: number }) => api.boards.removeColumn(boardId, columnId))
 export const usePlaceTask = () =>
   useBoardMutation(({ boardId, taskId, columnId, sortOrder }: { boardId: number; taskId: number; columnId: number | null; sortOrder?: number }) =>
     api.boards.place(boardId, taskId, columnId, sortOrder),
@@ -238,7 +280,8 @@ export const useUnplaceTask = () =>
 // --- notes ---
 
 export function useNotes(projectId?: number) {
-  return useQuery({ queryKey: keys.noteList(projectId), queryFn: () => api.notes.list(projectId) })
+  const select = usePendingFilter(visibleNotes)
+  return useQuery({ queryKey: keys.noteList(projectId), queryFn: () => api.notes.list(projectId), select })
 }
 
 export function useNote(id: number) {
@@ -260,17 +303,6 @@ export function useUpdateNote() {
     onSuccess: (note) => {
       // Don't refetch the open note: the editor owns its content while typing.
       qc.setQueryData(keys.note(note.id), note)
-      qc.invalidateQueries({ queryKey: ['notes', 'list'] })
-    },
-  })
-}
-
-export function useDeleteNote() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: number) => api.notes.remove(id),
-    onSuccess: (_, id) => {
-      qc.removeQueries({ queryKey: keys.note(id) })
       qc.invalidateQueries({ queryKey: ['notes', 'list'] })
     },
   })

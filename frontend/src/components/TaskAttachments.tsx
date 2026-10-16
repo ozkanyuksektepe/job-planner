@@ -1,9 +1,9 @@
 import { ChevronLeft, ChevronRight, Download, ImagePlus, Loader2, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { Attachment, AttachmentOwner } from '../lib/api'
-import { useAttachments, useDeleteAttachment, useUploadAttachments } from '../lib/hooks'
+import { useAttachments, useUploadAttachments } from '../lib/hooks'
 import { CountPill, ErrorBox } from './ui'
-import { confirmDialog } from './ConfirmDialog'
+import { deleteWithUndo } from '../lib/undo'
 
 const ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
 
@@ -17,7 +17,6 @@ export default function TaskAttachments({ taskId }: { taskId: number }) {
   const attachments = all.filter((a) => a.kind === 'image')
   const upload = useUploadAttachments()
   const { mutate: uploadFiles } = upload
-  const remove = useDeleteAttachment()
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [viewing, setViewing] = useState<number | null>(null)
@@ -60,7 +59,7 @@ export default function TaskAttachments({ taskId }: { taskId: number }) {
               </button>
               <button
                 type="button"
-                onClick={async () => (await confirmDialog({ title: 'Bu fotoğraf silinsin mi?', message: 'Bu işlem geri alınamaz.' })) && remove.mutate({ id: a.id, owner })}
+                onClick={() => deleteWithUndo({ kind: 'attachment', id: a.id, endpoint: `/attachments/${a.id}`, message: 'Fotoğraf silindi' })}
                 className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-lg bg-black/55 text-white opacity-0 backdrop-blur transition-opacity hover:bg-rose-600 group-hover:opacity-100"
                 title="Fotoğrafı sil"
               >

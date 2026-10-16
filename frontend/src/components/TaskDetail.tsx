@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import type { Task, TaskPatch, TaskStatus } from '../lib/api'
 import { addDays, formatTimestamp, todayISO } from '../lib/dates'
-import { useDeleteTask, useProjects, useTask, useTasks, useUpdateTask } from '../lib/hooks'
+import { useProjects, useTask, useTasks, useUpdateTask } from '../lib/hooks'
 import { useTaskPanel } from '../lib/useTaskPanel'
 import DescriptionEditor from './DescriptionEditor'
 import QuickAdd from './QuickAdd'
@@ -12,7 +12,7 @@ import VoiceRecordings from './VoiceRecordings'
 import TagPicker from './TagPicker'
 import { TaskCheckbox } from './TaskItem'
 import { Button, ColorDot, CountPill, ErrorBox, PRIORITY_DOTS, PRIORITY_LABELS, Segmented, Spinner, STATUS_LABELS } from './ui'
-import { confirmDialog } from './ConfirmDialog'
+import { deleteWithUndo } from '../lib/undo'
 
 /** Floating right-hand panel for viewing and editing one task. */
 export default function TaskDetail({ taskId }: { taskId: number }) {
@@ -73,7 +73,6 @@ const linkBtn = 'h-7 rounded-md px-2 text-xs text-fg-muted transition-colors hov
 function TaskForm({ task }: { task: Task }) {
   const { open, close } = useTaskPanel()
   const update = useUpdateTask()
-  const remove = useDeleteTask()
   const { data: projects = [] } = useProjects()
   const [title, setTitle] = useState(task.title)
   const today = todayISO()
@@ -87,13 +86,13 @@ function TaskForm({ task }: { task: Task }) {
     if (t !== task.title) save({ title: t })
   }
 
-  async function deleteTask() {
-    const ok = await confirmDialog({
-      title: `"${task.title}" silinsin mi?`,
-      message: task.subtask_count > 0 ? `${task.subtask_count} alt görev de silinecek. Bu işlem geri alınamaz.` : 'Bu işlem geri alınamaz.',
+  function deleteTask() {
+    deleteWithUndo({
+      kind: 'task',
+      id: task.id,
+      endpoint: `/tasks/${task.id}`,
+      message: `"${task.title}" silindi${task.subtask_count > 0 ? ` · ${task.subtask_count} alt görevle` : ''}`,
     })
-    if (!ok) return
-    await remove.mutateAsync(task.id)
     if (task.parent_id) open(task.parent_id)
     else close()
   }
@@ -249,7 +248,6 @@ function TaskForm({ task }: { task: Task }) {
 
 function Subtasks({ task }: { task: Task }) {
   const { open } = useTaskPanel()
-  const remove = useDeleteTask()
   const { data: subtasks = [] } = useTasks({ parent_id: task.id })
   const done = subtasks.filter((s) => s.status === 'done').length
 
@@ -277,7 +275,7 @@ function Subtasks({ task }: { task: Task }) {
             </button>
             <button
               type="button"
-              onClick={() => remove.mutate(s.id)}
+              onClick={() => deleteWithUndo({ kind: 'task', id: s.id, endpoint: `/tasks/${s.id}`, message: `"${s.title}" silindi` })}
               className="rounded p-0.5 text-fg-faint opacity-0 transition-opacity hover:text-rose-500 group-hover:opacity-100"
               title="Sil"
             >

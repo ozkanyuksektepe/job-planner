@@ -13,7 +13,7 @@ export default function InboxPage() {
 
   return (
     <Page>
-      <PageHeader eyebrow="Yakala, sonra planla" title="Gelen Kutusu" subtitle="Henüz bir projeye ya da güne atanmamış işler." />
+      <PageHeader eyebrow="Yakala, sonra planla" title="Gelen Kutusu" subtitle="Henüz bir projeye atanmamış işler. Proje panolarında da Planlanmamış sütununda görünürler." />
       <QuickAdd defaults={filter.defaults} placeholder="Aklına geleni yaz…" />
       <FilterBar state={filter} shown={tasks.length} total={data?.length} />
 
@@ -24,7 +24,7 @@ export default function InboxPage() {
           <EmptyState
             icon={<Inbox className="size-6" />}
             title="Gelen kutusu boş"
-            hint="Aklına gelen her şeyi buraya hızlıca yaz; sonra projeye taşı ya da bir güne planla."
+            hint="Aklına gelen her şeyi buraya hızlıca yaz; sonra bir projeye taşı ya da bir panonun alanına sürükle."
           />
         ) : (
           <TaskList tasks={tasks} emptyText={filter.active ? 'Filtreye uyan görev yok' : 'Bekleyen iş yok'} />
