@@ -64,9 +64,11 @@ export function CountPill({ children, tone = 'default' }: { children: ReactNode;
 }
 
 /** Small rounded label used for task / note metadata. */
-export function Chip({ icon, children, tone = 'default', className = '' }: {
+export function Chip({ icon, children, tone = 'default', title, className = '' }: {
   icon?: ReactNode
-  children: ReactNode
+  children?: ReactNode
+  /** tooltip; also the accessible name of an icon-only chip */
+  title?: string
   tone?: 'default' | 'danger' | 'warning' | 'orange' | 'info' | 'accent'
   className?: string
 }) {
@@ -79,7 +81,11 @@ export function Chip({ icon, children, tone = 'default', className = '' }: {
     accent: 'bg-accent-soft text-accent-fg',
   }[tone]
   return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-4 ${styles} ${className}`}>
+    <span
+      title={title}
+      aria-label={children ? undefined : title}
+      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-4 ${styles} ${className}`}
+    >
       {icon}
       {children}
     </span>

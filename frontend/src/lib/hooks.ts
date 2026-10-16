@@ -16,6 +16,7 @@ export const keys = {
   tag: (id: number) => ['tags', 'one', id] as const,
   boards: ['boards'] as const,
   board: (id: number) => ['boards', 'one', id] as const,
+  projectBoards: (projectId: number) => ['boards', 'project', projectId] as const,
   notes: ['notes'] as const,
   noteList: (projectId?: number) => ['notes', 'list', projectId ?? 'all'] as const,
   note: (id: number) => ['notes', 'one', id] as const,
@@ -188,21 +189,31 @@ export function useDeleteTag() {
 
 // --- boards ---
 
-export function useBoards() {
-  return useQuery({ queryKey: keys.boards, queryFn: api.boards.list })
+export function useProjectBoards(projectId: number) {
+  return useQuery({ queryKey: keys.projectBoards(projectId), queryFn: () => api.boards.list(projectId) })
 }
 
 export function useBoard(id: number) {
   return useQuery({ queryKey: keys.board(id), queryFn: () => api.boards.get(id) })
 }
 
-/** Wraps a board API call in a mutation that refreshes all board queries afterwards. */
+/**
+ * Wraps a board API call in a mutation that refreshes all board queries afterwards,
+ * plus task queries, since tasks show the boards and columns they are in.
+ */
 function useBoardMutation<V, R>(fn: (vars: V) => Promise<R>) {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: fn, onSuccess: () => qc.invalidateQueries({ queryKey: keys.boards }) })
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.boards })
+      qc.invalidateQueries({ queryKey: keys.tasks })
+    },
+  })
 }
 
-export const useCreateBoard = () => useBoardMutation((name: string) => api.boards.create(name))
+export const useCreateBoard = () =>
+  useBoardMutation(({ projectId, name }: { projectId: number; name: string }) => api.boards.create(projectId, name))
 export const useRenameBoard = () => useBoardMutation(({ id, name }: { id: number; name: string }) => api.boards.rename(id, name))
 export const useDeleteBoard = () => useBoardMutation((id: number) => api.boards.remove(id))
 export const useCreateBoardColumn = () =>
@@ -210,6 +221,10 @@ export const useCreateBoardColumn = () =>
 export const useRenameBoardColumn = () =>
   useBoardMutation(({ boardId, columnId, name }: { boardId: number; columnId: number; name: string }) =>
     api.boards.updateColumn(boardId, columnId, { name }),
+  )
+export const useMoveBoardColumn = () =>
+  useBoardMutation(({ boardId, columnId, position }: { boardId: number; columnId: number; position: number }) =>
+    api.boards.updateColumn(boardId, columnId, { position }),
   )
 export const useDeleteBoardColumn = () =>
   useBoardMutation(({ boardId, columnId }: { boardId: number; columnId: number }) => api.boards.removeColumn(boardId, columnId))

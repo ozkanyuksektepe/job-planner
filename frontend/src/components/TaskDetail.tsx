@@ -1,15 +1,18 @@
-import { ArrowUpLeft, Calendar, CircleDot, Flag, FolderClosed, Hash, Signal, Trash2, X } from 'lucide-react'
+import { ArrowUpLeft, Calendar, ChevronRight, CircleDot, Columns3, Flag, FolderClosed, Hash, Signal, Trash2, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import type { Task, TaskPatch, TaskStatus } from '../lib/api'
 import { addDays, formatTimestamp, todayISO } from '../lib/dates'
 import { useDeleteTask, useProjects, useTask, useTasks, useUpdateTask } from '../lib/hooks'
 import { useTaskPanel } from '../lib/useTaskPanel'
+import DescriptionEditor from './DescriptionEditor'
 import QuickAdd from './QuickAdd'
 import TaskAttachments from './TaskAttachments'
 import VoiceRecordings from './VoiceRecordings'
 import TagPicker from './TagPicker'
 import { TaskCheckbox } from './TaskItem'
 import { Button, ColorDot, CountPill, ErrorBox, PRIORITY_DOTS, PRIORITY_LABELS, Segmented, Spinner, STATUS_LABELS } from './ui'
+import { confirmDialog } from './ConfirmDialog'
 
 /** Floating right-hand panel for viewing and editing one task. */
 export default function TaskDetail({ taskId }: { taskId: number }) {
@@ -73,7 +76,6 @@ function TaskForm({ task }: { task: Task }) {
   const remove = useDeleteTask()
   const { data: projects = [] } = useProjects()
   const [title, setTitle] = useState(task.title)
-  const [description, setDescription] = useState(task.description)
   const today = todayISO()
   const isSubtask = task.parent_id !== null
 
@@ -86,8 +88,11 @@ function TaskForm({ task }: { task: Task }) {
   }
 
   async function deleteTask() {
-    const extra = task.subtask_count > 0 ? ` (${task.subtask_count} alt görev de silinecek)` : ''
-    if (!confirm(`"${task.title}" silinsin mi?${extra}`)) return
+    const ok = await confirmDialog({
+      title: `"${task.title}" silinsin mi?`,
+      message: task.subtask_count > 0 ? `${task.subtask_count} alt görev de silinecek. Bu işlem geri alınamaz.` : 'Bu işlem geri alınamaz.',
+    })
+    if (!ok) return
     await remove.mutateAsync(task.id)
     if (task.parent_id) open(task.parent_id)
     else close()
@@ -189,20 +194,35 @@ function TaskForm({ task }: { task: Task }) {
           </select>
         </Field>
 
+        {task.project_id !== null && task.boards.length > 0 && (
+          <Field icon={<Columns3 className="size-3.5" />} label={task.boards.length > 1 ? 'Panolar' : 'Pano'}>
+            <div className="flex min-w-0 flex-wrap gap-1 py-1">
+              {task.boards.map((b) => (
+                <Link
+                  key={b.board_id}
+                  // Keeps the panel open on the board.
+                  to={`/projects/${task.project_id}/boards/${b.board_id}?task=${task.id}`}
+                  className="inline-flex min-w-0 items-center gap-1 rounded-md bg-hover px-2 py-1 text-xs text-fg transition-colors hover:bg-accent-soft hover:text-accent-fg"
+                  title="Panoya git"
+                >
+                  <span className="truncate font-medium">{b.board_name}</span>
+                  <ChevronRight className="size-3 shrink-0 text-fg-faint" />
+                  <span className="truncate text-fg-muted">
+                    {task.status === 'done' ? 'Tamamlananlar' : (b.column_name ?? 'Planlanmamış')}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </Field>
+        )}
+
         <Field icon={<Hash className="size-3.5" />} label="Etiketler">
           <TagPicker value={task.tags} onChange={(tag_ids) => save({ tag_ids })} />
         </Field>
       </div>
 
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-faint">Açıklama</div>
-      <textarea
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        onBlur={() => description !== task.description && save({ description })}
-        placeholder="Detaylar, linkler, notlar…"
-        rows={4}
-        className="field-sizing-content mb-7 min-h-24 w-full resize-none rounded-xl border border-line bg-surface-2 px-3.5 py-3 text-sm leading-relaxed outline-none transition-all placeholder:text-fg-faint focus:border-accent/50 focus:bg-surface focus:ring-4 focus:ring-accent/10"
-      />
+      <DescriptionEditor taskId={task.id} content={task.description} />
 
       <TaskAttachments taskId={task.id} />
 

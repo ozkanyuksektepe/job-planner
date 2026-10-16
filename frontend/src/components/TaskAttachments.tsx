@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { Attachment, AttachmentOwner } from '../lib/api'
 import { useAttachments, useDeleteAttachment, useUploadAttachments } from '../lib/hooks'
 import { CountPill, ErrorBox } from './ui'
+import { confirmDialog } from './ConfirmDialog'
 
 const ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
 
@@ -59,7 +60,7 @@ export default function TaskAttachments({ taskId }: { taskId: number }) {
               </button>
               <button
                 type="button"
-                onClick={() => confirm('Bu fotoğraf silinsin mi?') && remove.mutate({ id: a.id, owner })}
+                onClick={async () => (await confirmDialog({ title: 'Bu fotoğraf silinsin mi?', message: 'Bu işlem geri alınamaz.' })) && remove.mutate({ id: a.id, owner })}
                 className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-lg bg-black/55 text-white opacity-0 backdrop-blur transition-opacity hover:bg-rose-600 group-hover:opacity-100"
                 title="Fotoğrafı sil"
               >

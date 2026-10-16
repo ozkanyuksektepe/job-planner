@@ -1,44 +1,29 @@
-import { Archive, ArchiveRestore, CheckCircle2, Circle, Columns3, List, ListTodo, LoaderCircle, NotebookPen, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { Archive, ArchiveRestore, Columns3, List, ListTodo, NotebookPen, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
-import Board, { sortOrderBetween, type BoardColumn, type BoardMove } from '../components/Board'
 import FilterBar from '../components/FilterBar'
+import NameDialog from '../components/NameDialog'
 import NoteGrid from '../components/NoteGrid'
+import ProjectBoard from '../components/ProjectBoard'
 import ProjectDialog from '../components/ProjectDialog'
 import QuickAdd from '../components/QuickAdd'
 import TaskList from '../components/TaskList'
-import { Button, Chip, ErrorBox, Page, Segmented, Spinner, STATUS_LABELS } from '../components/ui'
-import type { Project, TaskStatus } from '../lib/api'
+import { Button, Chip, ErrorBox, Page, Spinner } from '../components/ui'
+import type { Project } from '../lib/api'
 import { useTaskFilters } from '../lib/filters'
-import { useCreateNote, useDeleteProject, useNotes, useProject, useTasks, useUpdateProject, useUpdateTask } from '../lib/hooks'
-
-type View = 'list' | 'board'
-
-function readView(): View {
-  try {
-    return localStorage.getItem('projectView') === 'board' ? 'board' : 'list'
-  } catch {
-    return 'list'
-  }
-}
+import { useCreateBoard, useCreateNote, useDeleteProject, useNotes, useProject, useProjectBoards, useTasks, useUpdateProject } from '../lib/hooks'
+import { confirmDialog } from '../components/ConfirmDialog'
 
 export default function ProjectPage({ tab }: { tab: 'tasks' | 'notes' }) {
-  const id = Number(useParams().projectId)
+  const params = useParams()
+  const id = Number(params.projectId)
+  // On /projects/:id/boards/:boardId the tasks tab shows that board instead of the list.
+  const boardId = params.boardId ? Number(params.boardId) : null
   const { data: project, isLoading, error } = useProject(id)
   const [editing, setEditing] = useState(false)
-  const [view, setViewState] = useState<View>(readView)
   const update = useUpdateProject()
   const remove = useDeleteProject()
   const navigate = useNavigate()
-
-  function setView(v: View) {
-    setViewState(v)
-    try {
-      localStorage.setItem('projectView', v)
-    } catch {
-      // not remembered, that's fine
-    }
-  }
 
   if (isLoading) return <Page><Spinner /></Page>
   if (error || !project) return <Page><ErrorBox error={error ?? 'Proje bulunamadı'} /></Page>
@@ -48,15 +33,19 @@ export default function ProjectPage({ tab }: { tab: 'tasks' | 'notes' }) {
   const archived = project.status === 'archived'
 
   async function deleteProject() {
-    if (!confirm(`"${project!.name}" projesi, tüm görevleri ve notlarıyla birlikte silinsin mi? Bu işlem geri alınamaz.`)) return
+    const ok = await confirmDialog({
+      title: `"${project!.name}" projesi silinsin mi?`,
+      message: 'Projenin tüm görevleri ve notları da silinecek. Bu işlem geri alınamaz.',
+    })
+    if (!ok) return
     await remove.mutateAsync(id)
     navigate('/today')
   }
 
-  const board = tab === 'tasks' && view === 'board'
+  const board = tab === 'tasks' && boardId !== null
 
   return (
-    <Page width={board ? 'wide' : 'narrow'}>
+    <Page width={board ? 'full' : 'narrow'}>
       <header className="mb-8">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div
@@ -107,40 +96,28 @@ export default function ProjectPage({ tab }: { tab: 'tasks' | 'notes' }) {
       <div className="mb-6 flex items-center justify-between gap-3">
         <div className="inline-flex rounded-xl bg-hover p-1">
           {[
-            { to: `/projects/${id}`, label: 'Görevler', icon: <ListTodo className="size-4" /> },
-            { to: `/projects/${id}/notes`, label: 'Notlar', icon: <NotebookPen className="size-4" /> },
+            { to: `/projects/${id}`, label: 'Görevler', icon: <ListTodo className="size-4" />, active: tab === 'tasks' },
+            { to: `/projects/${id}/notes`, label: 'Notlar', icon: <NotebookPen className="size-4" />, active: tab === 'notes' },
           ].map((t) => (
             <NavLink
               key={t.to}
               to={t.to}
-              end
-              className={({ isActive }) =>
-                `flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all ${
-                  isActive ? 'bg-surface text-fg shadow-sm ring-1 ring-line' : 'text-fg-muted hover:text-fg'
-                }`
-              }
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all ${
+                t.active ? 'bg-surface text-fg shadow-sm ring-1 ring-line' : 'text-fg-muted hover:text-fg'
+              }`}
             >
               {t.icon}
               {t.label}
             </NavLink>
           ))}
         </div>
-        {tab === 'tasks' && (
-          <Segmented<View>
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'list', label: <><List className="size-3.5" /> Liste</> },
-              { value: 'board', label: <><Columns3 className="size-3.5" /> Pano</> },
-            ]}
-          />
-        )}
+        {tab === 'tasks' && <ViewSwitcher projectId={id} boardId={boardId} />}
       </div>
 
       {tab === 'notes' ? (
         <ProjectNotes project={project} />
       ) : board ? (
-        <ProjectBoard projectId={id} />
+        <ProjectBoard key={boardId} projectId={id} boardId={boardId} />
       ) : (
         <ProjectTasks projectId={id} />
       )}
@@ -150,47 +127,45 @@ export default function ProjectPage({ tab }: { tab: 'tasks' | 'notes' }) {
   )
 }
 
-const STATUS_ICONS: Record<TaskStatus, ReactNode> = {
-  todo: <Circle className="size-3.5 text-fg-faint" />,
-  doing: <LoaderCircle className="size-3.5 text-amber-500" />,
-  done: <CheckCircle2 className="size-3.5 text-emerald-500" />,
-}
+/** "Liste" plus one tab per board of the project, and "+ Pano" to create one. */
+function ViewSwitcher({ projectId, boardId }: { projectId: number; boardId: number | null }) {
+  const { data: boards = [] } = useProjectBoards(projectId)
+  const create = useCreateBoard()
+  const navigate = useNavigate()
+  const [creating, setCreating] = useState(false)
+  const item = (active: boolean) =>
+    `flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
+      active ? 'bg-surface text-fg shadow-sm ring-1 ring-line' : 'text-fg-muted hover:text-fg'
+    }`
 
-function ProjectBoard({ projectId }: { projectId: number }) {
-  const { data, isLoading, error } = useTasks({ project_id: projectId })
-  const update = useUpdateTask()
-  // Columns already show the status, so only priority and tag filters apply here.
-  const filter = useTaskFilters(['project', 'status'])
-  const { apply, defaults } = filter
-
-  const columns = useMemo<BoardColumn[]>(
-    () =>
-      (['todo', 'doing', 'done'] as TaskStatus[]).map((status) => ({
-        id: status,
-        title: STATUS_LABELS[status],
-        icon: STATUS_ICONS[status],
-        tasks: apply(data ?? []).filter((t) => t.status === status).sort((a, b) => a.sort_order - b.sort_order),
-        quickAdd: status === 'done' ? undefined : { ...defaults, project_id: projectId, status },
-      })),
-    [data, projectId, apply, defaults],
-  )
-
-  function onMove({ task, columnId, before, after, changedColumn }: BoardMove) {
-    update.mutate({
-      id: task.id,
-      patch: {
-        sort_order: sortOrderBetween(before, after, task.sort_order),
-        ...(changedColumn ? { status: columnId as TaskStatus } : {}),
-      },
-    })
-  }
-
-  if (isLoading) return <Spinner />
-  if (error) return <ErrorBox error={error} />
   return (
     <>
-      <FilterBar state={filter} shown={apply(data ?? []).length} total={data?.length} />
-      <Board columns={columns} onMove={onMove} showProject={false} showStatus={false} columnClassName="w-80" />
+      <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-lg bg-hover p-0.5">
+        <NavLink to={`/projects/${projectId}`} className={item(boardId === null)}>
+          <List className="size-3.5" /> Liste
+        </NavLink>
+        {boards.map((b) => (
+          <NavLink key={b.id} to={`/projects/${projectId}/boards/${b.id}`} className={item(boardId === b.id)} title={b.name}>
+            <Columns3 className="size-3.5" />
+            <span className="max-w-36 truncate">{b.name}</span>
+          </NavLink>
+        ))}
+        <button type="button" onClick={() => setCreating(true)} className={item(false)} title="Yeni pano">
+          <Plus className="size-3.5" /> Pano
+        </button>
+      </div>
+      {creating && (
+        <NameDialog
+          title="Yeni pano"
+          placeholder="örn. Sprint, Yol haritası"
+          submitLabel="Oluştur"
+          onSubmit={async (name) => {
+            const board = await create.mutateAsync({ projectId, name })
+            navigate(`/projects/${projectId}/boards/${board.id}`)
+          }}
+          onClose={() => setCreating(false)}
+        />
+      )}
     </>
   )
 }
@@ -206,7 +181,7 @@ function ProjectTasks({ projectId }: { projectId: number }) {
       {isLoading && <Spinner />}
       {error && <ErrorBox error={error} />}
       {data && (
-        <TaskList tasks={tasks} showProject={false} emptyText={filter.active ? 'Filtreye uyan açık görev yok' : 'Açık görev yok'} />
+        <TaskList tasks={tasks} showProject={false} sortable emptyText={filter.active ? 'Filtreye uyan açık görev yok' : 'Açık görev yok'} />
       )}
     </>
   )

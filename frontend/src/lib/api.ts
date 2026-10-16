@@ -34,6 +34,19 @@ export interface Task {
   image_count: number
   audio_count: number
   tags: TagRef[]
+  /**
+   * Boards of the task's project the task was placed on. A single task (GET /tasks/:id) also lists
+   * the boards whose "Planlanmamış" column shows it without a placement.
+   */
+  boards: TaskBoardRef[]
+}
+
+/** column_id null: "Planlanmamış", or "Tamamlananlar" when the task is done. */
+export interface TaskBoardRef {
+  board_id: number
+  board_name: string
+  column_id: number | null
+  column_name: string | null
 }
 
 export interface Attachment {
@@ -71,6 +84,7 @@ export interface Tag extends TagRef {
 
 export interface Board {
   id: number
+  project_id: number
   name: string
   created_at: string
   open_tasks: number
@@ -93,9 +107,9 @@ export interface BoardItem {
 export interface BoardView extends Board {
   columns: BoardColumn[]
   items: BoardItem[]
-  /** tasks placed on the board, any status */
+  /** the project's tasks placed on the board, any status */
   tasks: Task[]
-  /** open, unscheduled top-level tasks not on this board yet */
+  /** the project's open top-level tasks not on this board yet */
   unplaced: Task[]
 }
 
@@ -224,9 +238,9 @@ export const api = {
     remove: (id: number) => request<void>('DELETE', `/tags/${id}`),
   },
   boards: {
-    list: () => request<Board[]>('GET', '/boards'),
+    list: (projectId: number) => request<Board[]>('GET', `/boards?project_id=${projectId}`),
     get: (id: number) => request<BoardView>('GET', `/boards/${id}`),
-    create: (name: string) => request<Board>('POST', '/boards', { name }),
+    create: (projectId: number, name: string) => request<Board>('POST', '/boards', { name, project_id: projectId }),
     rename: (id: number, name: string) => request<Board>('PATCH', `/boards/${id}`, { name }),
     remove: (id: number) => request<void>('DELETE', `/boards/${id}`),
     createColumn: (id: number, name: string) => request<BoardColumn>('POST', `/boards/${id}/columns`, { name }),

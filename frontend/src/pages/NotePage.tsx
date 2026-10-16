@@ -7,6 +7,7 @@ import { Button, ErrorBox, Page, Spinner } from '../components/ui'
 import type { Note, NotePatch } from '../lib/api'
 import { formatTimestamp } from '../lib/dates'
 import { useDeleteNote, useNote, useProjects, useUpdateNote } from '../lib/hooks'
+import { confirmDialog } from '../components/ConfirmDialog'
 
 const AUTOSAVE_DELAY = 700
 
@@ -90,7 +91,7 @@ function NoteView({ note }: { note: Note }) {
   const backTo = note.project_id ? `/projects/${note.project_id}/notes` : '/notes'
 
   async function deleteNote() {
-    if (!confirm('Bu not silinsin mi? Bu işlem geri alınamaz.')) return
+    if (!(await confirmDialog({ title: 'Bu not silinsin mi?', message: 'Bu işlem geri alınamaz.' }))) return
     await remove.mutateAsync(note.id)
     navigate(backTo)
   }

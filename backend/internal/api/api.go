@@ -301,7 +301,11 @@ func (s *Server) deleteTag(w http.ResponseWriter, r *http.Request) {
 // --- boards ---
 
 func (s *Server) listBoards(w http.ResponseWriter, r *http.Request) {
-	respond(w, http.StatusOK)(s.store.ListBoards())
+	projectID, ok := queryID(w, r.URL.Query().Get("project_id"), "project_id")
+	if !ok {
+		return
+	}
+	respond(w, http.StatusOK)(s.store.ListBoards(projectID))
 }
 
 func (s *Server) getBoard(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +315,7 @@ func (s *Server) getBoard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createBoard(w http.ResponseWriter, r *http.Request) {
-	var in store.NameInput
+	var in store.BoardInput
 	if decode(w, r, &in) {
 		respond(w, http.StatusCreated)(s.store.CreateBoard(in))
 	}

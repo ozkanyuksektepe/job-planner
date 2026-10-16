@@ -1,14 +1,14 @@
-import { Archive, CalendarDays, ChevronRight, Columns3, Hash, Inbox, Monitor, Moon, NotebookPen, Plus, Sun, SunMedium } from 'lucide-react'
+import { Archive, CalendarDays, ChevronRight, Hash, Inbox, Monitor, Moon, NotebookPen, Plus, Sun, SunMedium } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { todayISO } from '../lib/dates'
-import { useBoards, useCreateBoard, useProjects, useTags, useTasks, useToday } from '../lib/hooks'
+import { useProjects, useTags, useTasks, useToday } from '../lib/hooks'
 import { useTheme, type ThemePref } from '../lib/theme'
 import { useTaskPanel } from '../lib/useTaskPanel'
-import NameDialog from './NameDialog'
 import ProjectDialog from './ProjectDialog'
 import TaskDetail from './TaskDetail'
 import { ColorDot } from './ui'
+import { ConfirmHost } from './ConfirmDialog'
 
 function NavItem({ to, icon, badge, children, end }: {
   to: string
@@ -67,9 +67,6 @@ export default function Layout() {
   const { data: today } = useToday(todayISO())
   const { data: inbox } = useTasks({ inbox: true })
   const { data: tags = [] } = useTags()
-  const { data: boards = [] } = useBoards()
-  const createBoard = useCreateBoard()
-  const [creatingBoard, setCreatingBoard] = useState(false)
   const [creating, setCreating] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const navigate = useNavigate()
@@ -100,34 +97,6 @@ export default function Layout() {
         </nav>
 
         <div className="mt-7 flex items-center justify-between px-2.5 pb-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-faint">Panolar</span>
-          <button
-            type="button"
-            onClick={() => setCreatingBoard(true)}
-            className="flex size-5 items-center justify-center rounded-md text-fg-faint transition-colors hover:bg-hover hover:text-fg"
-            title="Yeni pano"
-          >
-            <Plus className="size-3.5" />
-          </button>
-        </div>
-        <nav className="flex flex-col gap-0.5">
-          {boards.map((b) => (
-            <NavItem key={b.id} to={`/boards/${b.id}`} icon={<Columns3 className="size-4" />} badge={b.open_tasks}>
-              {b.name}
-            </NavItem>
-          ))}
-          {boards.length === 0 && (
-            <button
-              type="button"
-              onClick={() => setCreatingBoard(true)}
-              className="flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-[13px] text-fg-faint transition-colors hover:bg-hover hover:text-fg-muted"
-            >
-              <Plus className="size-4" /> Pano oluştur
-            </button>
-          )}
-        </nav>
-
-        <div className="mt-6 flex items-center justify-between px-2.5 pb-1.5">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-faint">Projeler</span>
           <button
             type="button"
@@ -201,19 +170,8 @@ export default function Layout() {
       </main>
 
       {taskId !== null && <TaskDetail key={taskId} taskId={taskId} />}
+      <ConfirmHost />
 
-      {creatingBoard && (
-        <NameDialog
-          title="Yeni pano"
-          placeholder="örn. Günlük işler"
-          submitLabel="Oluştur"
-          onSubmit={async (name) => {
-            const board = await createBoard.mutateAsync(name)
-            navigate(`/boards/${board.id}`)
-          }}
-          onClose={() => setCreatingBoard(false)}
-        />
-      )}
 
       {creating && (
         <ProjectDialog

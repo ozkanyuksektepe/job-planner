@@ -29,6 +29,18 @@ type Task struct {
 	ImageCount   int      `json:"image_count"`
 	AudioCount   int      `json:"audio_count"`
 	Tags         []TagRef `json:"tags"`
+	// Boards of the task's project the task was placed on. GetTask (the task panel) also adds
+	// the boards whose "Planlanmamış" column shows it without a placement.
+	Boards []TaskBoardRef `json:"boards"`
+}
+
+// TaskBoardRef is a board of the task's project that shows the task, and the column it is in
+// (nil: "Planlanmamış", or "Tamamlananlar" when the task is done).
+type TaskBoardRef struct {
+	BoardID    int64   `json:"board_id"`
+	BoardName  string  `json:"board_name"`
+	ColumnID   *int64  `json:"column_id"`
+	ColumnName *string `json:"column_name"`
 }
 
 type TaskInput struct {
@@ -102,8 +114,17 @@ func (s *Store) queryTasks(q string, args ...any) ([]Task, error) {
 	if err := s.attachTags(out); err != nil {
 		return nil, err
 	}
+	if err := s.attachBoards(out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
+
+// newSortOrderSQL puts a new top-level task first (lists show newest first) and a new
+// subtask last (subtasks keep the order they were added in). Its parameter: is top-level.
+const newSortOrderSQL = `CASE WHEN ?
+	THEN (SELECT COALESCE(MIN(sort_order), 0) - 1 FROM tasks WHERE parent_id IS NULL)
+	ELSE (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks) END`
 
 func (s *Store) ListTasks(f TaskFilter) ([]Task, error) {
 	var where []string
@@ -197,7 +218,83 @@ func (s *Store) GetTask(id int64) (Task, error) {
 	if len(tasks) == 0 {
 		return Task{}, ErrNotFound
 	}
-	return tasks[0], nil
+	t := tasks[0]
+	if t.Boards, err = s.taskBoards(t); err != nil {
+		return Task{}, err
+	}
+	return t, nil
+}
+
+// attachBoards fills Boards with the task's placements on boards of its own project.
+func (s *Store) attachBoards(tasks []Task) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	byID := make(map[int64]*Task, len(tasks))
+	placeholders := make([]string, len(tasks))
+	args := make([]any, len(tasks))
+	for i := range tasks {
+		tasks[i].Boards = []TaskBoardRef{}
+		byID[tasks[i].ID] = &tasks[i]
+		placeholders[i] = "?"
+		args[i] = tasks[i].ID
+	}
+
+	rows, err := s.db.Query(`
+		SELECT i.task_id, b.id, b.name, c.id, c.name
+		FROM board_items i
+		JOIN boards b ON b.id = i.board_id
+		JOIN tasks t ON t.id = i.task_id AND t.project_id = b.project_id
+		LEFT JOIN board_columns c ON c.id = i.column_id
+		WHERE i.task_id IN (`+strings.Join(placeholders, ",")+`)
+		ORDER BY b.created_at, b.id`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var taskID int64
+		var ref TaskBoardRef
+		if err := rows.Scan(&taskID, &ref.BoardID, &ref.BoardName, &ref.ColumnID, &ref.ColumnName); err != nil {
+			return err
+		}
+		if t := byID[taskID]; t != nil {
+			t.Boards = append(t.Boards, ref)
+		}
+	}
+	return rows.Err()
+}
+
+// taskBoards lists the boards of the task's project the task appears on: boards it was placed on,
+// plus (for open top-level tasks) every other board, whose "Planlanmamış" column shows it.
+func (s *Store) taskBoards(t Task) ([]TaskBoardRef, error) {
+	if t.ProjectID == nil {
+		return []TaskBoardRef{}, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT b.id, b.name, c.id, c.name, i.task_id IS NOT NULL
+		FROM boards b
+		LEFT JOIN board_items i ON i.board_id = b.id AND i.task_id = ?
+		LEFT JOIN board_columns c ON c.id = i.column_id
+		WHERE b.project_id = ?
+		ORDER BY b.created_at, b.id`, t.ID, *t.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	unplacedShown := t.ParentID == nil && t.Status != "done"
+	out := []TaskBoardRef{}
+	for rows.Next() {
+		var ref TaskBoardRef
+		var placed bool
+		if err := rows.Scan(&ref.BoardID, &ref.BoardName, &ref.ColumnID, &ref.ColumnName, &placed); err != nil {
+			return nil, err
+		}
+		if placed || unplacedShown {
+			out = append(out, ref)
+		}
+	}
+	return out, rows.Err()
 }
 
 func validStatus(s string) bool { return s == "todo" || s == "doing" || s == "done" }
@@ -247,10 +344,10 @@ func (s *Store) CreateTask(in TaskInput) (Task, error) {
 	res, err := tx.Exec(`
 		INSERT INTO tasks (project_id, parent_id, title, description, status, priority,
 		                   due_date, scheduled_date, sort_order, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, `+newSortOrderSQL+`,
 		        CASE WHEN ? THEN `+nowSQL+` END)`,
 		in.ProjectID, in.ParentID, in.Title, in.Description, in.Status, in.Priority,
-		in.DueDate, in.ScheduledDate, in.Status == "done")
+		in.DueDate, in.ScheduledDate, in.ParentID == nil, in.Status == "done")
 	if err != nil {
 		return Task{}, err
 	}

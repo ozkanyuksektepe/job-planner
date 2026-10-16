@@ -1,15 +1,16 @@
 import { CalendarClock, CheckCircle2, Columns3, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import Board, { sortOrderBetween, type BoardColumn, type BoardMove } from '../components/Board'
-import FilterBar from '../components/FilterBar'
-import NameDialog from '../components/NameDialog'
-import { TaskCompleteContext } from '../components/TaskItem'
-import { Button, EmptyState, ErrorBox, Page, PageHeader, Spinner } from '../components/ui'
+import { useNavigate } from 'react-router-dom'
+import Board, { sortOrderBetween, type BoardColumn, type BoardMove, type ColumnMove } from './Board'
+import { confirmDialog } from './ConfirmDialog'
+import FilterBar from './FilterBar'
+import NameDialog from './NameDialog'
+import { TaskCompleteContext } from './TaskItem'
+import { Button, EmptyState, ErrorBox, Spinner } from './ui'
 import type { BoardColumn as Column, Task } from '../lib/api'
 import { useTaskFilters } from '../lib/filters'
 import {
-  useBoard, useCreateBoardColumn, useDeleteBoard, useDeleteBoardColumn, usePlaceTask, useRenameBoard, useRenameBoardColumn,
+  useBoard, useCreateBoardColumn, useDeleteBoard, useDeleteBoardColumn, useMoveBoardColumn, usePlaceTask, useRenameBoard, useRenameBoardColumn,
   useUnplaceTask, useUpdateTask,
 } from '../lib/hooks'
 
@@ -17,22 +18,27 @@ import {
 const UNPLACED = 'unplaced'
 const DONE = 'done'
 const columnKey = (id: number) => `col-${id}`
+const columnIdOf = (key: string) => Number(key.slice('col-'.length))
 
 type Dialog = { kind: 'renameBoard' } | { kind: 'addColumn' } | { kind: 'renameColumn'; column: Column } | null
 
-export default function BoardPage() {
-  const boardId = Number(useParams().boardId)
+/** A project's board: user columns ("alanlar") plus "Planlanmamış" and "Tamamlananlar". */
+export default function ProjectBoard({ projectId, boardId }: { projectId: number; boardId: number }) {
   const { data: board, isLoading, error } = useBoard(boardId)
   const navigate = useNavigate()
   const [dialog, setDialog] = useState<Dialog>(null)
-  const filter = useTaskFilters()
-  const { apply, defaults } = filter
+  // The board only holds this project's tasks, so the project filter is meaningless here.
+  const filter = useTaskFilters(['project'])
+  const { apply } = filter
+  // New tasks go to this project so they can show up on its board.
+  const defaults = useMemo(() => ({ ...filter.defaults, project_id: projectId }), [filter.defaults, projectId])
 
   // `mutate` functions are stable, so they can be memo dependencies without resetting the board.
   const { mutate: updateTask } = useUpdateTask()
   const { mutate: placeTask } = usePlaceTask()
   const { mutate: unplaceTask } = useUnplaceTask()
   const { mutate: deleteColumn } = useDeleteBoardColumn()
+  const { mutate: moveColumn } = useMoveBoardColumn()
   const renameBoard = useRenameBoard()
   const deleteBoard = useDeleteBoard()
   const addColumn = useCreateBoardColumn()
@@ -56,6 +62,9 @@ export default function BoardPage() {
     const withBoardOrder = (t: Task): Task => ({ ...t, sort_order: itemByTask.get(t.id)?.sort_order ?? t.sort_order })
     const tasks = apply(board.tasks)
     const open = tasks.filter((t) => t.status !== 'done').map(withBoardOrder)
+    const done = tasks
+      .filter((t) => t.status === 'done')
+      .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
     const inColumn = (columnId: number | null) =>
       open.filter((t) => (itemByTask.get(t.id)?.column_id ?? null) === columnId).sort((a, b) => a.sort_order - b.sort_order)
 
@@ -71,6 +80,7 @@ export default function BoardPage() {
       },
       ...board.columns.map((c) => ({
         id: columnKey(c.id),
+        movable: true,
         title: c.name,
         tasks: inColumn(c.id),
         quickAdd: defaults,
@@ -87,10 +97,12 @@ export default function BoardPage() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (confirm(`"${c.name}" alanı silinsin mi? İçindeki görevler silinmez, Planlanmamış'a döner.`)) {
-                  deleteColumn({ boardId, columnId: c.id })
-                }
+              onClick={async () => {
+                const ok = await confirmDialog({
+                  title: `"${c.name}" alanı silinsin mi?`,
+                  message: "İçindeki görevler silinmez, Planlanmamış'a döner.",
+                })
+                if (ok) deleteColumn({ boardId, columnId: c.id })
               }}
               className="flex size-6 items-center justify-center rounded-md text-fg-faint hover:bg-rose-500/10 hover:text-rose-500"
               title="Alanı sil"
@@ -105,9 +117,8 @@ export default function BoardPage() {
         title: 'Tamamlananlar',
         icon: <CheckCircle2 className="size-3.5 text-emerald-500" />,
         // Most recently completed first.
-        tasks: tasks
-          .filter((t) => t.status === 'done')
-          .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? '')),
+        tasks: done,
+        countAll: true,
       },
     ]
   }, [board, itemByTask, boardId, placeTask, deleteColumn, apply, defaults])
@@ -130,47 +141,64 @@ export default function BoardPage() {
     placeTask({
       boardId,
       taskId: task.id,
-      columnId: Number(columnId.slice('col-'.length)),
+      columnId: columnIdOf(columnId),
       sortOrder: sortOrderBetween(before, after, item?.sort_order ?? 0),
     })
   }
 
-  async function removeBoard() {
-    if (!board || !confirm(`"${board.name}" panosu silinsin mi? Görevler silinmez, sadece bu pano kaldırılır.`)) return
-    await deleteBoard.mutateAsync(boardId)
-    navigate('/today')
+  // New position halfway between the neighbouring areas, like task sort orders.
+  function onMoveColumn({ columnId, before, after }: ColumnMove) {
+    if (!board) return
+    const positionOf = (key: string | null) => board.columns.find((c) => key !== null && c.id === columnIdOf(key))?.position
+    const prev = positionOf(before)
+    const next = positionOf(after)
+    const position =
+      prev !== undefined && next !== undefined ? (prev + next) / 2 : prev !== undefined ? prev + 1 : next !== undefined ? next - 1 : 0
+    moveColumn({ boardId, columnId: columnIdOf(columnId), position })
   }
 
-  if (isLoading) return <Page><Spinner /></Page>
-  if (error || !board) return <Page><ErrorBox error={error ?? 'Pano bulunamadı'} /></Page>
+  async function removeBoard() {
+    if (!board) return
+    const ok = await confirmDialog({
+      title: `"${board.name}" panosu silinsin mi?`,
+      message: 'Görevler silinmez, sadece bu pano kaldırılır.',
+    })
+    if (!ok) return
+    await deleteBoard.mutateAsync(boardId)
+    navigate(`/projects/${projectId}`)
+  }
+
+  if (isLoading) return <Spinner />
+  if (error || !board || board.project_id !== projectId) return <ErrorBox error={error ?? 'Pano bulunamadı'} />
 
   return (
-    <Page width="full">
-      <PageHeader
-        eyebrow="Pano"
-        title={board.name}
-        subtitle={`${board.open_tasks} açık görev · ${board.columns.length} alan`}
-        actions={
-          <>
-            <Button variant="primary" onClick={() => setDialog({ kind: 'addColumn' })}>
-              <Plus className="size-4" /> Alan ekle
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => setDialog({ kind: 'renameBoard' })} title="Panoyu yeniden adlandır">
-              <Pencil className="size-4" />
-            </Button>
-            <Button variant="danger" size="icon" onClick={removeBoard} title="Panoyu sil">
-              <Trash2 className="size-4" />
-            </Button>
-          </>
-        }
-      />
+    <>
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-semibold tracking-tight">{board.name}</h2>
+          <p className="text-xs text-fg-muted">
+            {board.open_tasks} açık görev · {board.columns.length} alan
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button variant="ghost" size="icon" onClick={() => setDialog({ kind: 'renameBoard' })} title="Panoyu yeniden adlandır">
+            <Pencil className="size-4" />
+          </Button>
+          <Button variant="danger" size="icon" onClick={removeBoard} title="Panoyu sil">
+            <Trash2 className="size-4" />
+          </Button>
+          <Button variant="primary" className="ml-1.5" onClick={() => setDialog({ kind: 'addColumn' })}>
+            <Plus className="size-4" /> Alan ekle
+          </Button>
+        </div>
+      </div>
 
       {board.columns.length === 0 && (
         <div className="mb-6 rounded-2xl border border-dashed border-line">
           <EmptyState
             icon={<Columns3 className="size-6" />}
             title="Henüz alan yok"
-            hint="Sağ üstteki “Alan ekle” ile Yapılacaklar, Önemli gibi alanlar oluştur; sonra görevleri sürükleyip bırak."
+            hint="“Alan ekle” ile Yapılacaklar, Önemli gibi alanlar oluştur; sonra görevleri sürükleyip bırak."
           />
         </div>
       )}
@@ -182,7 +210,7 @@ export default function BoardPage() {
       />
 
       <TaskCompleteContext.Provider value={onComplete}>
-        <Board columns={columns} onMove={onMove} columnClassName="w-64" />
+        <Board columns={columns} onMove={onMove} onMoveColumn={onMoveColumn} showProject={false} boardId={boardId} columnClassName="w-64" />
       </TaskCompleteContext.Provider>
 
       {dialog?.kind === 'renameBoard' && (
@@ -210,6 +238,6 @@ export default function BoardPage() {
           onClose={() => setDialog(null)}
         />
       )}
-    </Page>
+    </>
   )
 }

@@ -7,32 +7,40 @@ import {
   Strikethrough, Undo2, type LucideIcon,
 } from 'lucide-react'
 
-function parseContent(content: string): JSONContent | string {
+/**
+ * Parses stored editor content: a TipTap JSON document, or (older task descriptions) plain text,
+ * which becomes one paragraph per line.
+ */
+export function parseContent(content: string): JSONContent | string {
   if (!content) return ''
   try {
-    return JSON.parse(content)
+    const doc = JSON.parse(content)
+    if (doc && typeof doc === 'object' && doc.type === 'doc') return doc
   } catch {
-    return content // fall back to treating it as HTML / plain text
+    // not JSON: plain text
+  }
+  return {
+    type: 'doc',
+    content: content.split('\n').map((line) => (line ? { type: 'paragraph', content: [{ type: 'text', text: line }] } : { type: 'paragraph' })),
   }
 }
+
+/** Extensions shared by every rich text editor in the app. */
+export function editorExtensions(placeholder: string) {
+  return [StarterKit, TaskList, TaskItem.configure({ nested: true }), Placeholder.configure({ placeholder })]
+}
+
+/** Typography for editor content; callers add sizing (e.g. prose-sm, min-h-…). */
+export const editorProse =
+  'tiptap prose prose-zinc dark:prose-invert max-w-none focus:outline-none prose-headings:mb-2 prose-headings:tracking-tight prose-p:my-1.5 prose-p:leading-relaxed prose-a:text-accent-fg prose-code:rounded prose-code:bg-hover prose-code:px-1 prose-code:py-0.5 prose-code:font-medium prose-code:before:content-none prose-code:after:content-none prose-pre:bg-surface-2 prose-pre:text-fg prose-blockquote:border-accent/40 prose-blockquote:not-italic prose-blockquote:text-fg-muted'
 
 /** Rich text editor; content is a TipTap JSON string, `onChange` fires on every edit. */
 export default function NoteEditor({ content, onChange }: { content: string; onChange: (json: string) => void }) {
   const editor = useEditor({
-    extensions: [
-      StarterKit,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Placeholder.configure({ placeholder: 'Yazmaya başla… (# başlık, - liste, [] yapılacak, > alıntı)' }),
-    ],
+    extensions: editorExtensions('Yazmaya başla… (# başlık, - liste, [] yapılacak, > alıntı)'),
     content: parseContent(content),
     onUpdate: ({ editor }) => onChange(JSON.stringify(editor.getJSON())),
-    editorProps: {
-      attributes: {
-        class:
-          'tiptap prose prose-zinc dark:prose-invert max-w-none min-h-[50vh] focus:outline-none prose-headings:mb-2 prose-headings:tracking-tight prose-p:my-1.5 prose-p:leading-relaxed prose-a:text-accent-fg prose-code:rounded prose-code:bg-hover prose-code:px-1 prose-code:py-0.5 prose-code:font-medium prose-code:before:content-none prose-code:after:content-none prose-pre:bg-surface-2 prose-pre:text-fg prose-blockquote:border-accent/40 prose-blockquote:not-italic prose-blockquote:text-fg-muted',
-      },
-    },
+    editorProps: { attributes: { class: `${editorProse} min-h-[50vh]` } },
   })
 
   return (
@@ -43,7 +51,10 @@ export default function NoteEditor({ content, onChange }: { content: string; onC
   )
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
+export function Toolbar({
+  editor,
+  className = 'sticky top-3 z-10 mb-6 border border-line bg-surface/85 shadow-lg shadow-black/5 backdrop-blur-md',
+}: { editor: Editor; className?: string }) {
   // Re-render only when the selection's formatting changes.
   const state = useEditorState({
     editor,
@@ -93,7 +104,7 @@ function Toolbar({ editor }: { editor: Editor }) {
   ]
 
   return (
-    <div className="sticky top-3 z-10 mb-6 inline-flex flex-wrap items-center gap-0.5 rounded-xl border border-line bg-surface/85 p-1 shadow-lg shadow-black/5 backdrop-blur-md">
+    <div className={`inline-flex flex-wrap items-center gap-0.5 rounded-xl p-1 ${className}`}>
       {groups.map((g, i) => (
         <div key={i} className="flex items-center gap-0.5 border-r border-line pr-0.5 last:border-r-0 last:pr-0">
           {g.map(({ icon: Icon, title, active, disabled, run }) => (

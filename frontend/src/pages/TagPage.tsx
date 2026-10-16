@@ -8,6 +8,7 @@ import { Button, EmptyState, ErrorBox, Page, PageHeader, PROJECT_COLORS, Spinner
 import type { Tag } from '../lib/api'
 import { useTaskFilters } from '../lib/filters'
 import { useDeleteTag, useTag, useTasks, useUpdateTag } from '../lib/hooks'
+import { confirmDialog } from '../components/ConfirmDialog'
 
 export default function TagPage() {
   const id = Number(useParams().tagId)
@@ -23,7 +24,11 @@ export default function TagPage() {
   if (error || !tag) return <Page><ErrorBox error={error ?? 'Etiket bulunamadı'} /></Page>
 
   async function deleteTag() {
-    if (!confirm(`"${tag!.name}" etiketi silinsin mi? Görevler silinmez, sadece bu etiket kaldırılır.`)) return
+    const ok = await confirmDialog({
+      title: `"${tag!.name}" etiketi silinsin mi?`,
+      message: 'Görevler silinmez, sadece bu etiket kaldırılır.',
+    })
+    if (!ok) return
     await remove.mutateAsync(id)
     navigate('/today')
   }

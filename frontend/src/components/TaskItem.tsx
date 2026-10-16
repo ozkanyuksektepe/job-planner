@@ -1,5 +1,5 @@
 import {
-  Calendar, Check, CornerDownRight, Flag, Hash, ImageIcon, ListChecks, Loader, Mic, SignalHigh, SignalLow, SignalMedium, Sun,
+  AlignLeft, Calendar, Check, ChevronRight, Columns3, CornerDownRight, Flag, Hash, ImageIcon, ListChecks, Loader, Mic, SignalHigh, SignalLow, SignalMedium, Sun,
 } from 'lucide-react'
 import { createContext, useContext, type ReactNode } from 'react'
 import type { Task, TagRef } from '../lib/api'
@@ -37,7 +37,16 @@ export function TagChip({ tag, children }: { tag: TagRef; children?: ReactNode }
 }
 
 /** Metadata chips shared by list rows and board cards. */
-export function taskMetaChips(task: Task, { showProject = true, showSchedule = true, showStatus = true } = {}): ReactNode[] {
+export function taskMetaChips(
+  task: Task,
+  { showProject = true, showSchedule = true, showStatus = true, boardId }: {
+    showProject?: boolean
+    showSchedule?: boolean
+    showStatus?: boolean
+    /** the board the task is shown on; its own chip would be redundant there */
+    boardId?: number
+  } = {},
+): ReactNode[] {
   const today = todayISO()
   const done = task.status === 'done'
   const overdue = !done && task.due_date !== null && task.due_date < today
@@ -56,6 +65,9 @@ export function taskMetaChips(task: Task, { showProject = true, showSchedule = t
         {formatRelative(task.due_date)}
       </Chip>
     ),
+    task.description.trim() !== '' && (
+      <Chip key="desc" icon={<AlignLeft className="size-3" />} title="Açıklaması var" />
+    ),
     task.subtask_count > 0 && (
       <Chip key="sub" tone={task.subtask_done === task.subtask_count ? 'accent' : 'default'} icon={<ListChecks className="size-3" />}>
         {task.subtask_done}/{task.subtask_count}
@@ -70,6 +82,16 @@ export function taskMetaChips(task: Task, { showProject = true, showSchedule = t
     showProject && task.project_name && (
       <Chip key="proj" icon={<ColorDot color={task.project_color} className="size-1.5" />}>{task.project_name}</Chip>
     ),
+    // Only open tasks in a column: "Planlanmamış" holds every open task, "Tamamlananlar" every done one.
+    ...(done ? [] : task.boards)
+      .filter((b) => b.column_id !== null && b.board_id !== boardId)
+      .map((b) => (
+        <Chip key={`board-${b.board_id}`} icon={<Columns3 className="size-3" />} title={`Pano: ${b.board_name} › ${b.column_name}`}>
+          {b.board_name}
+          <ChevronRight className="-mx-0.5 size-2.5 opacity-60" />
+          {b.column_name}
+        </Chip>
+      )),
     ...task.tags.map((tag) => <TagChip key={`tag-${tag.id}`} tag={tag} />),
   ].filter(Boolean)
 }

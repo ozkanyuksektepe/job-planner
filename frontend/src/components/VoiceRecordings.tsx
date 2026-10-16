@@ -3,6 +3,7 @@ import { useAttachments, useDeleteAttachment, useUploadAttachments } from '../li
 import AudioPlayer from './AudioPlayer'
 import { CountPill, ErrorBox } from './ui'
 import VoiceRecorder from './VoiceRecorder'
+import { confirmDialog } from './ConfirmDialog'
 
 /** "Ses kayıtları" section for a task or a note: the recordings' players plus the recorder. */
 export default function VoiceRecordings({ owner }: { owner: AttachmentOwner }) {
@@ -23,7 +24,7 @@ export default function VoiceRecordings({ owner }: { owner: AttachmentOwner }) {
           <AudioPlayer
             key={a.id}
             attachment={a}
-            onDelete={() => confirm('Bu ses kaydı silinsin mi?') && remove.mutate({ id: a.id, owner })}
+            onDelete={async () => (await confirmDialog({ title: 'Bu ses kaydı silinsin mi?', message: 'Bu işlem geri alınamaz.' })) && remove.mutate({ id: a.id, owner })}
           />
         ))}
         <VoiceRecorder
